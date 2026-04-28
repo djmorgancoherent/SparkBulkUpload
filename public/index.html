@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Coherent Spark — Bulk Upload</title>
+  <style>
+    /* ── Reset & Base ───────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue-50:   #eff6ff;
+      --blue-100:  #dbeafe;
+      --blue-500:  #3b82f6;
+      --blue-600:  #2563eb;
+      --blue-700:  #1d4ed8;
+      --blue-900:  #1e3a8a;
+      --slate-50:  #f8fafc;
+      --slate-100: #f1f5f9;
+      --slate-200: #e2e8f0;
+      --slate-300: #cbd5e1;
+      --slate-400: #94a3b8;
+      --slate-500: #64748b;
+      --slate-600: #475569;
+      --slate-700: #334155;
+      --slate-800: #1e293b;
+      --slate-900: #0f172a;
+      --green-50:  #f0fdf4;
+      --green-500: #22c55e;
+      --green-600: #16a34a;
+      --green-700: #15803d;
+      --red-50:    #fef2f2;
+      --red-500:   #ef4444;
+      --red-600:   #dc2626;
+      --amber-50:  #fffbeb;
+      --amber-500: #f59e0b;
+      --amber-600: #d97706;
+      --radius:    10px;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+      --shadow:    0 4px 6px -1px rgba(0,0,0,.08), 0 2px 4px -2px rgba(0,0,0,.05);
+      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,.08), 0 4px 6px -4px rgba(0,0,0,.05);
+    }
+
+    html, body {
+      height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
+      background: var(--slate-100);
+      color: var(--slate-800);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────────────── */
+    .app { min-height: 100vh; display: flex; flex-direction: column; }
+
+    header {
+      background: var(--slate-900);
+      color: #fff;
+      padding: 0 28px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: var(--shadow);
+      flex-shrink: 0;
+    }
+    header .logo {
+      width: 28px; height: 28px;
+      background: var(--blue-600);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 13px; color: #fff; letter-spacing: -.5px;
+    }
+    header h1 { font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
+    header .subtitle { font-size: 12px; color: var(--slate-400); margin-left: 4px; }
+
+    /* ── Stepper ─────────────────────────────────────────────────────────────── */
+    .stepper {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      padding: 20px 28px 0;
+      max-width: 720px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    .step-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+    }
+    .step-item:last-child { flex: 0; }
+    .step-dot {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      border: 2px solid var(--slate-300);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 600;
+      color: var(--slate-400);
+      background: #fff;
+      transition: all .2s;
+      flex-shrink: 0;
+    }
+    .step-dot.active  { border-color: var(--blue-600); background: var(--blue-600); color: #fff; }
+    .step-dot.done    { border-color: var(--green-600); background: var(--green-600); color: #fff; }
+    .step-label { font-size: 12px; font-weight: 500; color: var(--slate-400); white-space: nowrap; }
+    .step-label.active { color: var(--blue-700); }
+    .step-label.done   { color: var(--green-700); }
+    .step-line { flex: 1; height: 2px; background: var(--slate-200); margin: 0 4px; }
+    .step-line.done { background: var(--green-500); }
+
+    /* ── Main Content ────────────────────────────────────────────────────────── */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 40px;
+    }
+    .panel {
+      width: 100%;
+      max-width: 720px;
+      display: none;
+    }
+    .panel.active { display: block; }
+
+    /* ── Card ────────────────────────────────────────────────────────────────── */
+    .card {
+      background: #fff;
+      border-radius: var(--radius);
+      border: 1px solid var(--slate-200);
+      box-shadow: var(--shadow-sm);
+      padding: 24px;
+      margin-top: 20px;
+    }
+    .card-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--slate-800);
+      margin-bottom: 4px;
+    }
+    .card-subtitle {
+      font-size: 13px;
+      color: var(--slate-500);
+      margin-bottom: 20px;
+    }
+
+    /* ── Form Elements ───────────────────────────────────────────────────────── */
+    .field { margin-bottom: 16px; }
+    .field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--slate-600);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 6px;
+    }
+    input[type="text"],
+    input[type="password"],
+    input[type="url"],
+    select {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid var(--slate-300);
+      border-radius: 6px;
+      font-size: 13px;
+      color: var(--slate-800);
+      background: #fff;
+      transition: border-color .15s, box-shadow .15s;
+      outline: none;
+    }
+    input:focus, select:focus {
+      border-color: var(--blue-500);
+      box-shadow: 0 0 0 3px rgba(59,130,246,.15);
+    }
+    input.inline {
+      width: 100%;
+      border: 1px solid transparent;
+      background: transparent;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    input.inline:hover { border-color: var(--slate-300); background: var(--slate-50); }
+    input.inline:focus { border-color: var(--blue-400); background: #fff; box-shadow: 0 0 0 2px rgba(59,130,246,.15); }
+
+    .radio-group { display: flex; gap: 12px; }
+    .radio-pill {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1.5px solid var(--slate-200);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all .15s;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .radio-pill:hover { border-color: var(--blue-300); background: var(--blue-50); }
+    .radio-pill input[type="radio"] { width: 14px; height: 14px; accent-color: var(--blue-600); }
+    .radio-pill.selected { border-color: var(--blue-500); background: var(--blue-50); }
+    .radio-pill .pill-label { font-size: 13px; font-weight: 500; }
+    .radio-pill .pill-desc  { font-size: 11px; color: var(--slate-500); }
+
+    /* ── Buttons ─────────────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 6px;
+      padding: 8px 18px;
+      border-radius: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: all .15s;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-primary {
+      background: var(--blue-600); color: #fff;
+      box-shadow: 0 1px 2px rgba(0,0,0,.1);
+    }
+    .btn-primary:not(:disabled):hover { background: var(--blue-700); }
+    .btn-secondary {
+      background: var(--slate-100); color: var(--slate-700);
+      border: 1px solid var(--slate-200);
+    }
+    .btn-secondary:not(:disabled):hover { background: var(--slate-200); }
+    .btn-danger {
+      background: var(--red-50); color: var(--red-600);
+      border: 1px solid #fecaca;
+    }
+    .btn-danger:not(:disabled):hover { background: #fecaca; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+    /* ── Update-version toggle ──────────────────────────────────────────────── */
+    .update-toggle {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .update-toggle input[type="checkbox"] {
+      width: 16px; height: 16px;
+      accent-color: var(--blue-600);
+      cursor: pointer;
+    }
+    .update-toggle-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--slate-500);
+      letter-spacing: .2px;
+      text-transform: uppercase;
+    }
+    .update-toggle input[type="checkbox"]:checked + .update-toggle-label {
+      color: var(--blue-600);
+    }
+    .btn-lg { padding: 10px 24px; font-size: 14px; }
+
+    /* ── Alert ───────────────────────────────────────────────────────────────── */
+    .alert {
+      padding: 10px 14px;
+      border-radius: 7px;
+      font-size: 13px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      margin-top: 12px;
+      line-height: 1.5;
+    }
+    .alert-error   { background: var(--red-50);   color: var(--red-600);   border: 1px solid #fecaca; }
+    .alert-success { background: var(--green-50);  color: var(--green-700); border: 1px solid #bbf7d0; }
+    .alert-info    { background: var(--blue-50);   color: var(--blue-700);  border: 1px solid var(--blue-100); }
+    .alert-warning { background: var(--amber-50);  color: var(--amber-600); border: 1px solid #fde68a; }
+    .alert .icon   { font-size: 15px; flex-shrink: 0; line-height: 1.4; }
+    .alert pre     { white-space: pre-wrap; word-break: break-all; font-size: 11px; margin-top: 4px; }
+
+    /* ── Drop Zone ───────────────────────────────────────────────────────────── */
+    #drop-zone {
+      border: 2px dashed var(--slate-300);
+      border-radius: var(--radius);
+      padding: 40px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all .2s;
+      background: var(--slate-50);
+      margin-bottom: 20px;
+    }
+    #drop-zone:hover, #drop-zone.drag-over {
+      border-color: var(--blue-400);
+      background: var(--blue-50);
+    }
+    #drop-zone .dz-icon { font-size: 36px; margin-bottom: 10px; }
+    #drop-zone .dz-title { font-size: 15px; font-weight: 600; color: var(--slate-700); }
+    #drop-zone .dz-sub   { font-size: 13px; color: var(--slate-500); margin-top: 4px; }
+    #drop-zone .dz-sub span { color: var(--blue-600); font-weight: 600; cursor: pointer; }
+    #file-input { display: none; }
+
+    /* ── File Table ──────────────────────────────────────────────────────────── */
+    .files-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .files-header h3 { font-size: 14px; font-weight: 600; color: var(--slate-700); }
+    .file-count {
+      background: var(--blue-600); color: #fff;
+      font-size: 11px; font-weight: 700;
+      padding: 2px 8px; border-radius: 999px;
+      margin-left: 6px;
+    }
+
+    .file-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .file-table th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: var(--slate-500);
+      padding: 8px 10px;
+      border-bottom: 2px solid var(--slate-200);
+    }
+    .file-table td {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--slate-100);
+      vertical-align: middle;
+    }
+    .file-table tr:last-child td { border-bottom: none; }
+    .file-table tr:hover td { background: var(--slate-50); }
+
+    .file-icon { font-size: 18px; }
+    .file-original-name { font-weight: 500; color: var(--slate-700); }
+    .file-size { font-size: 11px; color: var(--slate-400); }
+    .folder-missing { color: var(--amber-600); font-size: 11px; }
+
+    /* ── Toolbar ─────────────────────────────────────────────────────────────── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .toolbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+    /* ── Progress Panel ──────────────────────────────────────────────────────── */
+    .overall-bar-wrap {
+      background: #fff;
+      border: 1px solid var(--slate-200);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-top: 20px;
+    }
+    .overall-label {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .overall-label .title { font-size: 14px; font-weight: 600; }
+    .overall-label .count { font-size: 13px; color: var(--slate-500); }
+    .bar-track {
+      height: 8px;
+      background: var(--slate-200);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--blue-500), var(--blue-600));
+      border-radius: 99px;
+      transition: width .4s ease;
+      width: 0%;
+    }
+    .bar-fill.success { background: linear-gradient(90deg, var(--green-500), var(--green-600)); }
+
+    /* ── File Progress Cards ─────────────────────────────────────────────────── */
+    .file-cards { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+
+    .file-card {
+      background: #fff;
+      border: 1px solid var(--slate-200);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: border-color .2s;
+    }
+    .file-card.active  { border-color: var(--blue-300); box-shadow: 0 0 0 3px rgba(59,130,246,.08); }
+    .file-card.success { border-color: var(--green-300); }
+    .file-card.error   { border-color: #fca5a5; }
+    .file-card.warning { border-color: #fde68a; }
+
+    .fc-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .fc-file-icon { font-size: 20px; flex-shrink: 0; }
+    .fc-info { flex: 1; min-width: 0; }
+    .fc-name  { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fc-sub   { font-size: 11px; color: var(--slate-500); }
+    .fc-badge {
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .badge-queued   { background: var(--slate-100); color: var(--slate-500); }
+    .badge-active   { background: var(--blue-100);  color: var(--blue-700);  }
+    .badge-success  { background: var(--green-50);  color: var(--green-700); }
+    .badge-warning  { background: var(--amber-50);  color: var(--amber-600); }
+    .badge-error    { background: var(--red-50);    color: var(--red-600);   }
+
+    /* Stages row */
+    .fc-stages {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .stage-chip {
+      display: flex; align-items: center; gap: 4px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 500;
+      border: 1px solid var(--slate-200);
+      color: var(--slate-400);
+      background: var(--slate-50);
+      transition: all .2s;
+      white-space: nowrap;
+    }
+    .stage-chip.active  { border-color: var(--blue-300); color: var(--blue-700); background: var(--blue-50); }
+    .stage-chip.done    { border-color: var(--green-300); color: var(--green-700); background: var(--green-50); }
+    .stage-chip.error   { border-color: #fca5a5; color: var(--red-600); background: var(--red-50); }
+    .stage-arrow { color: var(--slate-300); font-size: 10px; }
+
+    /* Compile progress within chip */
+    .stage-chip .chip-pct { font-size: 10px; opacity: .8; }
+
+    /* Progress bar (shown during compile) */
+    .fc-compile-bar { }
+    .fc-compile-label { font-size: 11px; color: var(--slate-500); margin-bottom: 4px; }
+    .fc-compile-track { height: 4px; background: var(--slate-100); border-radius: 99px; overflow: hidden; }
+    .fc-compile-fill  { height: 100%; background: var(--blue-500); border-radius: 99px; transition: width .4s; width: 0%; }
+
+    /* Error/success detail */
+    .fc-detail {
+      font-size: 12px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      line-height: 1.5;
+    }
+    .fc-detail.success { background: var(--green-50); color: var(--green-700); }
+    .fc-detail.error   { background: var(--red-50); color: var(--red-600); }
+    .fc-detail.warning { background: var(--amber-50); color: var(--amber-600); }
+    .fc-detail a { color: inherit; font-weight: 600; word-break: break-all; }
+
+    /* Spinner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block;
+      width: 12px; height: 12px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+    }
+
+    /* ── Summary ─────────────────────────────────────────────────────────────── */
+    .summary-bar {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+    .summary-chip {
+      flex: 1; min-width: 120px;
+      padding: 14px 18px;
+      border-radius: var(--radius);
+      border: 1px solid var(--slate-200);
+      background: #fff;
+      text-align: center;
+    }
+    .summary-chip .sc-num  { font-size: 28px; font-weight: 700; line-height: 1; }
+    .summary-chip .sc-lbl  { font-size: 12px; color: var(--slate-500); margin-top: 4px; }
+    .summary-chip.sc-ok    .sc-num { color: var(--green-600); }
+    .summary-chip.sc-warn  .sc-num { color: var(--amber-500); }
+    .summary-chip.sc-fail  .sc-num { color: var(--red-500); }
+
+    /* ── Utility ─────────────────────────────────────────────────────────────── */
+    .hidden  { display: none !important; }
+    .divider { height: 1px; background: var(--slate-200); margin: 20px 0; }
+    .row     { display: flex; gap: 12px; align-items: flex-start; }
+    .row > * { flex: 1; }
+    .text-muted { color: var(--slate-500); font-size: 12px; }
+
+    /* pulse animation for active cards */
+    @keyframes pulse-border {
+      0%   { box-shadow: 0 0 0 0 rgba(59,130,246,.3); }
+      70%  { box-shadow: 0 0 0 6px rgba(59,130,246,0); }
+      100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+    }
+    .file-card.active { animation: pulse-border 2s ease infinite; }
+
+    /* Checkmark animation */
+    @keyframes pop { 0% { transform: scale(.5); opacity:0; } 80% { transform: scale(1.2); } 100% { transform: scale(1); opacity:1; } }
+    .pop { animation: pop .3s ease forwards; }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── Header ──────────────────────────────────────────────────────────────── -->
+  <header>
+    <div class="logo">CS</div>
+    <h1>Coherent Spark</h1>
+    <span class="subtitle">/ Bulk Upload</span>
+  </header>
+
+  <!-- ── Stepper ─────────────────────────────────────────────────────────────── -->
+  <div class="stepper" id="stepper">
+    <div class="step-item">
+      <div class="step-dot active" id="sd-1">1</div>
+      <span class="step-label active" id="sl-1">Connect</span>
+    </div>
+    <div class="step-line" id="sl-line-1"></div>
+    <div class="step-item">
+      <div class="step-dot" id="sd-2">2</div>
+      <span class="step-label" id="sl-2">Configure</span>
+    </div>
+    <div class="step-line" id="sl-line-2"></div>
+    <div class="step-item">
+      <div class="step-dot" id="sd-3">3</div>
+      <span class="step-label" id="sl-3">Upload</span>
+    </div>
+  </div>
+
+  <!-- ── Main ────────────────────────────────────────────────────────────────── -->
+  <div class="main">
+
+    <!-- ════════════════════════════════════════════════════════════
+         PANEL 1 — Connect
+    ═════════════════════════════════════════════════════════════ -->
+    <div class="panel active" id="panel-connect">
+      <div class="card">
+        <div class="card-title">Connect to Coherent Spark</div>
+        <div class="card-subtitle">Enter your Spark environment URL and authentication credentials.</div>
+
+        <div class="field">
+          <label>Spark Base URL</label>
+          <input type="url" id="input-url" placeholder="https://spark.uat.au.coherent.global/my-tenant" />
+        </div>
+
+        <div class="field">
+          <label>Authentication Method</label>
+          <div class="radio-group">
+            <label class="radio-pill selected" id="pill-token">
+              <input type="radio" name="auth-type" value="token" checked />
+              <div>
+                <div class="pill-label">Bearer Token</div>
+                <div class="pill-desc">JWT from Spark console</div>
+              </div>
+            </label>
+            <label class="radio-pill" id="pill-apikey">
+              <input type="radio" name="auth-type" value="apikey" />
+              <div>
+                <div class="pill-label">API / Synthetic Key</div>
+                <div class="pill-desc">Long-lived x-synthetic-key</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="field" id="field-token">
+          <label>Bearer Token</label>
+          <input type="password" id="input-token" placeholder="eyJhbGciOiJ..." autocomplete="off" />
+        </div>
+        <div class="field hidden" id="field-apikey">
+          <label>API Key</label>
+          <input type="password" id="input-apikey" placeholder="your-synthetic-key" autocomplete="off" />
+        </div>
+
+        <div id="connect-error"></div>
+
+        <div style="margin-top: 8px;">
+          <button class="btn btn-primary btn-lg" id="btn-connect">
+            <span id="btn-connect-icon">🔌</span>
+            <span id="btn-connect-text">Connect &amp; Fetch Folders</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+         PANEL 2 — Configure files
+    ═════════════════════════════════════════════════════════════ -->
+    <div class="panel" id="panel-files">
+      <div class="card">
+        <div class="card-title">Configure Upload</div>
+        <div class="card-subtitle">
+          Drop your Excel files below. Edit service names and select a target Spark folder for each.
+        </div>
+
+        <!-- Drop zone -->
+        <div id="drop-zone">
+          <div class="dz-icon">📂</div>
+          <div class="dz-title">Drop Excel files here</div>
+          <div class="dz-sub">or <span id="browse-link">browse your computer</span></div>
+          <div class="dz-sub" style="margin-top:6px; font-size:12px;">Supports .xlsx files</div>
+          <input type="file" id="file-input" accept=".xlsx,.xls,.xlsm" multiple />
+        </div>
+
+        <!-- Files list -->
+        <div id="files-section" class="hidden">
+          <div class="files-header">
+            <h3>
+              Files to upload
+              <span class="file-count" id="file-count-badge">0</span>
+            </h3>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span class="text-muted" id="folder-status-label"></span>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-folders">↻ Refresh Folders</button>
+              <button class="btn btn-danger btn-sm" id="btn-clear-all">Clear all</button>
+            </div>
+          </div>
+
+          <div style="overflow-x:auto;">
+            <table class="file-table">
+              <thead>
+                <tr>
+                  <th style="width:32px;"></th>
+                  <th>Original File</th>
+                  <th style="min-width:160px;">Service Name</th>
+                  <th style="min-width:160px;">Target Folder</th>
+                  <th style="width:96px; text-align:center;" title="Tick to update an existing service instead of creating a new one">Update?</th>
+                  <th style="width:40px;"></th>
+                </tr>
+              </thead>
+              <tbody id="file-table-body"></tbody>
+            </table>
+          </div>
+
+          <div id="files-error"></div>
+
+          <div class="divider"></div>
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+            <button class="btn btn-secondary" id="btn-back-connect">← Back</button>
+            <button class="btn btn-primary btn-lg" id="btn-start-upload" disabled>
+              ⬆️ Upload <span id="upload-count-label">0</span> Files
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+         PANEL 3 — Upload progress
+    ═════════════════════════════════════════════════════════════ -->
+    <div class="panel" id="panel-upload">
+
+      <!-- Overall progress bar -->
+      <div class="overall-bar-wrap">
+        <div class="overall-label">
+          <span class="title">📤 Uploading to Coherent Spark</span>
+          <span class="count" id="overall-count">0 / 0</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill" id="overall-fill"></div>
+        </div>
+      </div>
+
+      <!-- File progress cards -->
+      <div class="file-cards" id="file-cards"></div>
+
+      <!-- Summary (shown when done) -->
+      <div id="summary-section" class="hidden">
+        <div class="summary-bar">
+          <div class="summary-chip sc-ok">
+            <div class="sc-num" id="sum-ok">0</div>
+            <div class="sc-lbl">Succeeded</div>
+          </div>
+          <div class="summary-chip sc-warn">
+            <div class="sc-num" id="sum-warn">0</div>
+            <div class="sc-lbl">Warnings</div>
+          </div>
+          <div class="summary-chip sc-fail">
+            <div class="sc-num" id="sum-fail">0</div>
+            <div class="sc-lbl">Failed</div>
+          </div>
+        </div>
+        <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="btn btn-secondary" id="btn-upload-again">⬅ Upload More Files</button>
+          <button class="btn btn-primary" id="btn-retry-failed" style="display:none;">↻ Retry Failed</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<script>
+'use strict';
+
+// ─── State ────────────────────────────────────────────────────────────────────
+
+const state = {
+  baseUrl:  '',
+  authType: 'token',   // 'token' | 'apikey'
+  token:    '',
+  apiKey:   '',
+  folders:  [],        // [{ id, name }]
+  files:    [],        // [{ id, file, serviceName, folder, status, stageState }]
+};
+
+let nextFileId = 1;
+
+// ─── DOM shortcuts ────────────────────────────────────────────────────────────
+
+const $  = (sel) => document.querySelector(sel);
+const $$ = (sel) => [...document.querySelectorAll(sel)];
+
+// ─── Step navigation ─────────────────────────────────────────────────────────
+
+function goToStep(n) {
+  $$('.panel').forEach((p, i) => p.classList.toggle('active', i === n - 1));
+
+  for (let i = 1; i <= 3; i++) {
+    const dot   = $(`#sd-${i}`);
+    const lbl   = $(`#sl-${i}`);
+    const line  = $(`#sl-line-${i}`);
+    if (i < n) {
+      dot.className  = 'step-dot done';
+      dot.textContent = '✓';
+      lbl.className  = 'step-label done';
+      if (line) line.className = 'step-line done';
+    } else if (i === n) {
+      dot.className  = 'step-dot active';
+      dot.textContent = String(i);
+      lbl.className  = 'step-label active';
+    } else {
+      dot.className  = 'step-dot';
+      dot.textContent = String(i);
+      lbl.className  = 'step-label';
+      if (line) line.className = 'step-line';
+    }
+  }
+}
+
+// ─── Alert helpers ────────────────────────────────────────────────────────────
+
+function showAlert(containerId, type, icon, message) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = `
+    <div class="alert alert-${type}">
+      <span class="icon">${icon}</span>
+      <div><pre>${escapeHtml(message)}</pre></div>
+    </div>`;
+}
+function clearAlert(containerId) {
+  document.getElementById(containerId).innerHTML = '';
+}
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ─── Auth radio pills ─────────────────────────────────────────────────────────
+
+$$('[name="auth-type"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    state.authType = radio.value;
+    $('#field-token').classList.toggle('hidden', radio.value !== 'token');
+    $('#field-apikey').classList.toggle('hidden', radio.value !== 'apikey');
+    $('#pill-token').classList.toggle('selected',  radio.value === 'token');
+    $('#pill-apikey').classList.toggle('selected', radio.value === 'apikey');
+  });
+});
+
+// ─── Connect ─────────────────────────────────────────────────────────────────
+
+$('#btn-connect').addEventListener('click', doConnect);
+$('#input-url').addEventListener('keydown', e => { if (e.key === 'Enter') doConnect(); });
+
+async function doConnect() {
+  clearAlert('connect-error');
+  const url    = $('#input-url').value.trim();
+  const token  = $('#input-token').value.trim();
+  const apiKey = $('#input-apikey').value.trim();
+
+  if (!url) { showAlert('connect-error', 'error', '⚠️', 'Please enter your Spark base URL.'); return; }
+
+  const authOk = (state.authType === 'token' && token) || (state.authType === 'apikey' && apiKey);
+  if (!authOk) { showAlert('connect-error', 'error', '⚠️', 'Please enter your authentication credential.'); return; }
+
+  state.baseUrl = url;
+  state.token   = token;
+  state.apiKey  = apiKey;
+
+  setConnectLoading(true);
+
+  try {
+    const folders = await fetchFolders();
+    state.folders = folders;
+    populateFolderSelects();
+    updateFolderStatusLabel();
+    goToStep(2);
+    updateUploadButton();
+  } catch (err) {
+    showAlert('connect-error', 'error', '❌', err.message);
+  } finally {
+    setConnectLoading(false);
+  }
+}
+
+function setConnectLoading(loading) {
+  const btn = $('#btn-connect');
+  btn.disabled = loading;
+  $('#btn-connect-icon').textContent = loading ? '' : '🔌';
+  if (loading) {
+    const span = document.createElement('span');
+    span.className = 'spinner';
+    $('#btn-connect-icon').replaceWith(span);
+    span.id = 'btn-connect-icon';
+  }
+  $('#btn-connect-text').textContent = loading ? 'Connecting…' : 'Connect & Fetch Folders';
+}
+
+async function fetchFolders() {
+  const body = { baseUrl: state.baseUrl };
+  if (state.authType === 'token') body.token  = state.token;
+  else                             body.apiKey = state.apiKey;
+
+  const resp = await fetch('/api/list-folders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  const data = await resp.json();
+  if (!data.success) throw new Error(data.error || 'Failed to list folders');
+  if (!data.folders?.length) throw new Error('No folders found in this tenant. Create at least one folder in Spark first.');
+  return data.folders;
+}
+
+// ─── Back button ─────────────────────────────────────────────────────────────
+
+$('#btn-back-connect').addEventListener('click', () => goToStep(1));
+
+// ─── Refresh folders ─────────────────────────────────────────────────────────
+
+$('#btn-refresh-folders').addEventListener('click', async () => {
+  const btn = $('#btn-refresh-folders');
+  btn.disabled = true;
+  btn.textContent = '↻ Refreshing…';
+  try {
+    state.folders = await fetchFolders();
+    populateFolderSelects();
+    updateFolderStatusLabel();
+  } catch (err) {
+    showAlert('files-error', 'error', '❌', err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↻ Refresh Folders';
+  }
+});
+
+function populateFolderSelects() {
+  $$('.folder-select').forEach(sel => {
+    const current = sel.value;
+    rebuildFolderSelect(sel);
+    if (current && state.folders.find(f => f.name === current)) {
+      sel.value = current;
+    }
+    // Update the state entry
+    const id = sel.dataset.fileId;
+    const entry = state.files.find(f => String(f.id) === String(id));
+    if (entry) entry.folder = sel.value;
+  });
+  updateUploadButton();
+}
+
+function rebuildFolderSelect(sel) {
+  const current = sel.value;
+  sel.innerHTML = `<option value="">— Select folder —</option>`;
+  state.folders.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f.name;
+    opt.textContent = f.name;
+    if (f.name === current) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function updateFolderStatusLabel() {
+  const lbl = $('#folder-status-label');
+  lbl.textContent = `${state.folders.length} folder${state.folders.length !== 1 ? 's' : ''} loaded`;
+}
+
+// ─── File Drop Zone ───────────────────────────────────────────────────────────
+
+const dropZone  = $('#drop-zone');
+const fileInput = $('#file-input');
+
+$('#browse-link').addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('click', (e) => {
+  if (e.target.id !== 'browse-link') fileInput.click();
+});
+fileInput.addEventListener('change', () => addFiles([...fileInput.files]));
+
+dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const files = [...(e.dataTransfer.files || [])].filter(f => /\.(xlsx|xls|xlsm)$/i.test(f.name));
+  if (files.length) addFiles(files);
+  else showAlert('files-error', 'warning', '⚠️', 'Only .xlsx / .xls / .xlsm files are accepted.');
+});
+
+function addFiles(newFiles) {
+  clearAlert('files-error');
+  newFiles.forEach(file => {
+    // Avoid duplicates by name
+    if (state.files.find(f => f.file.name === file.name)) return;
+    const stem = file.name.replace(/\.(xlsx|xls|xlsm)$/i, '');
+    state.files.push({
+      id:            nextFileId++,
+      file,
+      serviceName:   stem,
+      folder:        '',
+      updateVersion: false,    // false = create new (fail if exists); true = update existing
+      status:        'queued', // queued | active | success | warning | error
+      stageState:    null,
+    });
+  });
+  renderFileTable();
+  updateUploadButton();
+}
+
+$('#btn-clear-all').addEventListener('click', () => {
+  state.files = [];
+  renderFileTable();
+  updateUploadButton();
+});
+
+function formatBytes(bytes) {
+  if (bytes < 1024)       return `${bytes} B`;
+  if (bytes < 1024*1024)  return `${(bytes/1024).toFixed(1)} KB`;
+  return `${(bytes/1024/1024).toFixed(1)} MB`;
+}
+
+function renderFileTable() {
+  const tbody = $('#file-table-body');
+  const section = $('#files-section');
+
+  if (!state.files.length) {
+    section.classList.add('hidden');
+    tbody.innerHTML = '';
+    $('#file-count-badge').textContent = '0';
+    return;
+  }
+
+  section.classList.remove('hidden');
+  $('#file-count-badge').textContent = state.files.length;
+
+  tbody.innerHTML = state.files.map(entry => `
+    <tr data-id="${entry.id}">
+      <td><span class="file-icon">📄</span></td>
+      <td>
+        <div class="file-original-name">${escapeHtml(entry.file.name)}</div>
+        <div class="file-size">${formatBytes(entry.file.size)}</div>
+      </td>
+      <td>
+        <input
+          class="inline service-name-input"
+          data-file-id="${entry.id}"
+          type="text"
+          value="${escapeHtml(entry.serviceName)}"
+          placeholder="Service name"
+        />
+      </td>
+      <td>
+        <select class="folder-select" data-file-id="${entry.id}">
+          <option value="">— Select folder —</option>
+          ${state.folders.map(f =>
+            `<option value="${escapeHtml(f.name)}"${f.name === entry.folder ? ' selected' : ''}>${escapeHtml(f.name)}</option>`
+          ).join('')}
+        </select>
+      </td>
+      <td style="text-align:center;">
+        <label class="update-toggle" title="Tick to add a new version to an existing service&#10;Unticked = create fresh (will fail if name already exists)">
+          <input
+            type="checkbox"
+            class="update-version-cb"
+            data-file-id="${entry.id}"
+            ${entry.updateVersion ? 'checked' : ''}
+          />
+          <span class="update-toggle-label">${entry.updateVersion ? 'Update' : 'New'}</span>
+        </label>
+      </td>
+      <td>
+        <button class="btn btn-danger btn-sm remove-btn" data-file-id="${entry.id}" title="Remove">✕</button>
+      </td>
+    </tr>
+  `).join('');
+
+  // Bind events
+  $$('.service-name-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const id    = Number(inp.dataset.fileId);
+      const entry = state.files.find(f => f.id === id);
+      if (entry) entry.serviceName = inp.value.trim();
+      updateUploadButton();
+    });
+  });
+
+  $$('.folder-select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const id    = Number(sel.dataset.fileId);
+      const entry = state.files.find(f => f.id === id);
+      if (entry) entry.folder = sel.value;
+      updateUploadButton();
+    });
+  });
+
+  $$('.update-version-cb').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const id    = Number(cb.dataset.fileId);
+      const entry = state.files.find(f => f.id === id);
+      if (entry) {
+        entry.updateVersion = cb.checked;
+        // Update the sibling label text immediately
+        const label = cb.nextElementSibling;
+        if (label) label.textContent = cb.checked ? 'Update' : 'New';
+      }
+    });
+  });
+
+  $$('.remove-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = Number(btn.dataset.fileId);
+      state.files = state.files.filter(f => f.id !== id);
+      renderFileTable();
+      updateUploadButton();
+    });
+  });
+}
+
+function updateUploadButton() {
+  const btn   = $('#btn-start-upload');
+  const valid = state.files.filter(f => f.serviceName && f.folder);
+  btn.disabled = valid.length === 0;
+  $('#upload-count-label').textContent = valid.length;
+}
+
+// ─── Start Upload ─────────────────────────────────────────────────────────────
+
+$('#btn-start-upload').addEventListener('click', startUpload);
+
+async function startUpload() {
+  const toUpload = state.files.filter(f => f.serviceName && f.folder);
+  if (!toUpload.length) return;
+
+  goToStep(3);
+  buildProgressCards(toUpload);
+  updateOverallBar(0, toUpload.length);
+
+  let done = 0, successes = 0, warnings = 0, failures = 0;
+
+  for (const entry of toUpload) {
+    setCardStatus(entry.id, 'active');
+    try {
+      await uploadFile(entry);
+      if (entry.status === 'success')      { successes++; }
+      else if (entry.status === 'warning') { warnings++;  }
+      else                                  { failures++;  }
+    } catch (err) {
+      setCardError(entry.id, err.message);
+      failures++;
+    }
+    done++;
+    updateOverallBar(done, toUpload.length);
+  }
+
+  // Show summary
+  $('#sum-ok').textContent   = successes;
+  $('#sum-warn').textContent = warnings;
+  $('#sum-fail').textContent = failures;
+  $('#summary-section').classList.remove('hidden');
+
+  // Update overall bar colour
+  if (failures === 0) $('#overall-fill').classList.add('success');
+
+  const retryBtn = $('#btn-retry-failed');
+  retryBtn.style.display = failures > 0 ? 'inline-flex' : 'none';
+}
+
+// ─── Progress Cards ───────────────────────────────────────────────────────────
+
+function buildProgressCards(entries) {
+  const container = $('#file-cards');
+  container.innerHTML = '';
+  $('#summary-section').classList.add('hidden');
+
+  entries.forEach(entry => {
+    const card = document.createElement('div');
+    card.className = 'file-card';
+    card.id = `card-${entry.id}`;
+    card.innerHTML = `
+      <div class="fc-top">
+        <div class="fc-file-icon">📄</div>
+        <div class="fc-info">
+          <div class="fc-name">${escapeHtml(entry.file.name)}</div>
+          <div class="fc-sub">${escapeHtml(entry.folder)} / ${escapeHtml(entry.serviceName)}</div>
+        </div>
+        <span class="fc-badge badge-queued" id="badge-${entry.id}">Queued</span>
+      </div>
+      <div class="fc-stages" id="stages-${entry.id}">
+        ${stageChipHtml('upload',  entry.id, 'Upload')}
+        <span class="stage-arrow">›</span>
+        ${stageChipHtml('compile', entry.id, 'Compile')}
+        <span class="stage-arrow">›</span>
+        ${stageChipHtml('publish', entry.id, 'Publish')}
+      </div>
+      <div class="fc-compile-bar hidden" id="compile-bar-${entry.id}">
+        <div class="fc-compile-label" id="compile-lbl-${entry.id}">Compiling: 0%</div>
+        <div class="fc-compile-track"><div class="fc-compile-fill" id="compile-fill-${entry.id}"></div></div>
+      </div>
+      <div class="fc-detail hidden" id="detail-${entry.id}"></div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function stageChipHtml(stage, fileId, label) {
+  return `<span class="stage-chip" id="chip-${stage}-${fileId}">${label}</span>`;
+}
+
+function setCardStatus(fileId, status) {
+  const card = $(`#card-${fileId}`);
+  if (!card) return;
+  card.className = `file-card ${status}`;
+  const badge = $(`#badge-${fileId}`);
+  const labels = { queued:'Queued', active:'Uploading…', success:'Done ✓', warning:'Warning ⚠️', error:'Failed ✗' };
+  const classes = { queued:'badge-queued', active:'badge-active', success:'badge-success', warning:'badge-warning', error:'badge-error' };
+  badge.className = `fc-badge ${classes[status] || 'badge-queued'}`;
+  badge.textContent = labels[status] || status;
+}
+
+function setChip(stage, fileId, chipStatus, labelOverride) {
+  const chip = $(`#chip-${stage}-${fileId}`);
+  if (!chip) return;
+  chip.className = `stage-chip ${chipStatus}`;
+  const icons = { active: '<span class="spinner"></span> ', done: '✓ ', error: '✗ ' };
+  chip.innerHTML = (icons[chipStatus] || '') + (labelOverride || stage.charAt(0).toUpperCase() + stage.slice(1));
+}
+
+function updateCompileBar(fileId, progress) {
+  const bar = $(`#compile-bar-${fileId}`);
+  const lbl = $(`#compile-lbl-${fileId}`);
+  const fill = $(`#compile-fill-${fileId}`);
+  if (!bar) return;
+  bar.classList.remove('hidden');
+  lbl.textContent = `Compiling: ${progress}%`;
+  fill.style.width = `${progress}%`;
+}
+
+function setCardDetail(fileId, type, html) {
+  const el = $(`#detail-${fileId}`);
+  if (!el) return;
+  el.className = `fc-detail ${type}`;
+  el.innerHTML = html;
+  el.classList.remove('hidden');
+}
+
+function setCardError(fileId, message) {
+  setCardStatus(fileId, 'error');
+  setChip('upload',  fileId, 'error');
+  setCardDetail(fileId, 'error', `❌ ${escapeHtml(message)}`);
+  const entry = state.files.find(f => f.id === fileId);
+  if (entry) entry.status = 'error';
+}
+
+function updateOverallBar(done, total) {
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  $('#overall-fill').style.width = `${pct}%`;
+  $('#overall-count').textContent = `${done} / ${total} files`;
+}
+
+// ─── Upload a single file (SSE stream) ───────────────────────────────────────
+
+async function uploadFile(entry) {
+  const formData = new FormData();
+  formData.append('file',          entry.file);
+  formData.append('baseUrl',       state.baseUrl);
+  formData.append('folder',        entry.folder);
+  formData.append('serviceName',   entry.serviceName);
+  formData.append('updateVersion', entry.updateVersion ? 'true' : 'false');
+  if (state.authType === 'token')  formData.append('token',  state.token);
+  else                              formData.append('apiKey', state.apiKey);
+
+  // Update badge to "Uploading…"
+  setCardStatus(entry.id, 'active');
+  const badge = $(`#badge-${entry.id}`);
+  if (badge) badge.textContent = 'Uploading…';
+
+  const resp = await fetch('/api/upload-stream', { method: 'POST', body: formData });
+
+  if (!resp.ok && !resp.body) {
+    throw new Error(`Server error: HTTP ${resp.status}`);
+  }
+
+  const reader  = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let   buffer  = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop(); // keep incomplete line
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      let event;
+      try { event = JSON.parse(line.slice(6)); } catch { continue; }
+      handleProgressEvent(entry, event);
+    }
+  }
+}
+
+function handleProgressEvent(entry, event) {
+  switch (event.type) {
+
+    case 'stage': {
+      const { stage, status, progress, message } = event;
+
+      // Update badge with current action
+      const badge = $(`#badge-${entry.id}`);
+      const actionLabel = { upload:'Uploading…', compile:'Compiling…', publish:'Publishing…' };
+      if (badge && status === 'active') badge.textContent = actionLabel[stage] || 'Working…';
+
+      if (status === 'active') {
+        setChip(stage, entry.id, 'active', stage === 'compile' && progress != null
+          ? `Compile <span class="chip-pct">${progress}%</span>` : null);
+        if (stage === 'compile' && progress != null) updateCompileBar(entry.id, progress);
+      } else if (status === 'done') {
+        const labels = { upload:'Upload ✓', compile:'Compile ✓', publish:'Publish ✓' };
+        setChip(stage, entry.id, 'done', labels[stage]);
+        if (stage === 'compile') {
+          const bar = $(`#compile-bar-${entry.id}`);
+          if (bar) bar.classList.add('hidden');
+        }
+      }
+      break;
+    }
+
+    case 'done': {
+      const { status, executeUrl, versionId, message, folder, serviceName } = event;
+
+      if (status === 'success') {
+        entry.status = 'success';
+        setCardStatus(entry.id, 'success');
+        const link = executeUrl
+          ? `<a href="${escapeHtml(executeUrl)}" target="_blank" rel="noopener">${escapeHtml(executeUrl)}</a>`
+          : '';
+        const vid = versionId ? ` &nbsp;·&nbsp; Version: <code>${escapeHtml(versionId)}</code>` : '';
+        setCardDetail(entry.id, 'success', `✅ Service published!${vid}${link ? `<br>🔗 ${link}` : ''}`);
+      } else if (status === 'warning') {
+        entry.status = 'warning';
+        setCardStatus(entry.id, 'warning');
+        setCardDetail(entry.id, 'warning', `⚠️ ${escapeHtml(message || 'Completed with warnings')}`);
+      } else {
+        entry.status = 'error';
+        setCardError(entry.id, message || 'Unknown error');
+      }
+      break;
+    }
+
+    case 'error': {
+      entry.status = 'error';
+      const { stage, message } = event;
+      if (stage) setChip(stage, entry.id, 'error');
+      setCardError(entry.id, message || 'Unknown error');
+      break;
+    }
+  }
+}
+
+// ─── Retry Failed ────────────────────────────────────────────────────────────
+
+$('#btn-retry-failed').addEventListener('click', async () => {
+  const failed = state.files.filter(f => f.status === 'error');
+  if (!failed.length) return;
+
+  // Reset their cards
+  failed.forEach(entry => {
+    entry.status = 'queued';
+    const card = $(`#card-${entry.id}`);
+    if (card) {
+      card.className = 'file-card';
+      const badge = $(`#badge-${entry.id}`);
+      if (badge) { badge.className = 'fc-badge badge-queued'; badge.textContent = 'Queued'; }
+      ['upload','compile','publish'].forEach(s => {
+        const chip = $(`#chip-${s}-${entry.id}`);
+        if (chip) { chip.className = 'stage-chip'; chip.textContent = s.charAt(0).toUpperCase()+s.slice(1); }
+      });
+      const detail = $(`#detail-${entry.id}`);
+      if (detail) detail.classList.add('hidden');
+    }
+  });
+
+  $('#summary-section').classList.add('hidden');
+  $('#btn-retry-failed').style.display = 'none';
+
+  const total = state.files.filter(f => f.folder && f.serviceName).length;
+  let done = state.files.filter(f => f.status === 'success' || f.status === 'warning').length;
+  updateOverallBar(done, total);
+
+  let successes = 0, warnings = 0, failures = 0;
+
+  for (const entry of failed) {
+    setCardStatus(entry.id, 'active');
+    try {
+      await uploadFile(entry);
+      if (entry.status === 'success')      successes++;
+      else if (entry.status === 'warning') warnings++;
+      else                                  failures++;
+    } catch (err) {
+      setCardError(entry.id, err.message);
+      failures++;
+    }
+    done++;
+    updateOverallBar(done, total);
+  }
+
+  // Recalculate full totals
+  const allEntries = state.files.filter(f => f.folder && f.serviceName);
+  $('#sum-ok').textContent   = allEntries.filter(f => f.status === 'success').length;
+  $('#sum-warn').textContent = allEntries.filter(f => f.status === 'warning').length;
+  $('#sum-fail').textContent = allEntries.filter(f => f.status === 'error').length;
+  $('#summary-section').classList.remove('hidden');
+  if (failures === 0) $('#overall-fill').classList.add('success');
+  if (failures > 0) $('#btn-retry-failed').style.display = 'inline-flex';
+});
+
+// ─── Upload Again ─────────────────────────────────────────────────────────────
+
+$('#btn-upload-again').addEventListener('click', () => {
+  state.files = [];
+  renderFileTable();
+  updateUploadButton();
+  $('#file-cards').innerHTML = '';
+  $('#overall-fill').style.width = '0%';
+  $('#overall-fill').classList.remove('success');
+  $('#summary-section').classList.add('hidden');
+  fileInput.value = '';
+  goToStep(2);
+});
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
+goToStep(1);
+</script>
+</body>
+</html>
