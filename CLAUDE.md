@@ -10,7 +10,8 @@ A local Node.js web app that lets users drag-and-drop Excel files and bulk-uploa
 browser (public/index.html)  ←SSE→  server.js (Express proxy)  →HTTP→  Coherent Spark REST API
 ```
 
-- **`server.js`** — Express server with two endpoints:
+- **`server.js`** — Express server with three endpoints:
+  - `GET  /api/config` — returns shared client/server config (`maxFileMb`, `uploadTimeoutMs`, `compileTimeoutMs`)
   - `POST /api/list-folders` — fetches all Spark folders for a tenant
   - `POST /api/upload-stream` — runs the upload → compile → publish pipeline, streaming SSE progress events
 - **`public/index.html`** — single-file SPA with a 3-step wizard: Connect → Configure → Upload
@@ -23,6 +24,19 @@ npm install
 node server.js            # starts on http://localhost:3000
 PORT=3001 node server.js  # alternate port
 ```
+
+### Tunables (env vars)
+
+| Var | Default | Notes |
+|---|---|---|
+| `PORT` | `3000` | HTTP port |
+| `MAX_FILE_MB` | `300` | Per-file size limit. Multer rejects above this with a graceful SSE error; the front-end pre-flights against `GET /api/config` so users see a friendly message before attempting the upload. |
+| `UPLOAD_TIMEOUT_MS` | `1800000` (30 min) | Upload POST axios timeout. Big enough that a 250 MB upload over a slow link won't time out; users see live byte progress so it never looks frozen. |
+| `COMPILE_TIMEOUT_MS` | `900000` (15 min) | Total compile-polling budget. |
+| `COMPILE_POLL_MS` | `3000` | Interval between compile polls. |
+| `COMPILE_MAX_TRANSIENT_ERRORS` | `8` | Consecutive poll-network failures before bailing (resets on any successful poll). |
+| `RETRY_MAX_ATTEMPTS` | `4` | Total attempts (incl. first try) for retryable axios calls. |
+| `RETRY_BASE_MS` | `1000` | Exponential-backoff base; capped at 10s. 429 honours `Retry-After` (capped at 60s). |
 
 ## Key Spark API facts
 
@@ -53,44 +67,79 @@ PORT=3001 node server.js  # alternate port
 Server writes `data: <JSON>\n\n`. Event shapes:
 
 ```js
-{ type: 'stage', stage: 'upload'|'compile'|'publish', status: 'active'|'done', progress?: number, message: string }
+{ type: 'stage', stage: 'upload'|'compile'|'publish'|'precheck',
+                 status: 'active'|'done',
+                 progress?: number,           // 0–100
+                 bytesLoaded?: number,        // upload only
+                 bytesTotal?: number,         // upload only
+                 message: string }
+{ type: 'heartbeat', stage: 'compile', tsMs: number }   // keeps client alive during long compiles
 { type: 'done',  status: 'success'|'warning', versionId?: string, executeUrl?: string, message?: string }
-{ type: 'error', stage?: string, message: string, code?: number }
+{ type: 'error', stage?: string, message: string,
+                 code?: number | 'precheck_failed' | 'name_conflict' | 'file_too_large'
+                              | 'compile_timeout' | 'compile_unreachable' | 'compile_failed' | string }
 ```
+
+Notes for evolving the contract:
+- Additions are backwards-compatible — `handleProgressEvent()` ignores unknown event types and unknown fields.
+- `code === 401` triggers the front-end's auth-expired flow (halts new files, shows toast).
+
+## Robustness features
+
+- **Retry helper (`withRetry`)** wraps the upload POST, publish POST, compile-poll inner GET, and pre-flight GET. Retries on 429/502/503/504 and `ECONNRESET`/`ETIMEDOUT`/`ECONNABORTED`/`EAI_AGAIN`/`EPIPE`. **401 is intentionally terminal** so it surfaces fast for the auth-expired flow. `Retry-After` headers are honoured (capped at 60s).
+- **Multipart retry caveat**: the upload `FormData` and `fs.createReadStream` are rebuilt **inside** each retry attempt because a stream cannot be replayed. The temp file on disk survives across retries; cleanup happens in the outer `finally`.
+- **Bounded compile polling**: `COMPILE_TIMEOUT_MS` is the wall-clock cap; `COMPILE_MAX_TRANSIENT_ERRORS` (default 8) is a guard against polling spinning forever during sustained network blips. Successful polls reset the consecutive-error counter. Heartbeat events emit on every successful poll so the client knows the server is alive even when `progress` hasn't moved.
+- **Fail-safe pre-flight check**: if the existence check itself fails, the upload is aborted with `code: 'precheck_failed'` (or `code: 401` if auth). This is a deliberate change from the old "log and proceed" behaviour, which could let credential glitches silently create duplicates.
+- **Multer guard**: a too-large file produces a graceful SSE `error` event with `code: 'file_too_large'` rather than an uncaught middleware exception.
 
 ## Front-end state
 
 ```js
 state = {
   baseUrl:  '',
-  authType: 'token' | 'apiKey',
+  authType: 'token' | 'apikey',
   token:    '',
   apiKey:   '',
   folders:  [{ id, name }],
   files: [{
     id, file, serviceName, folder,
-    updateVersion: false,   // false = new service (pre-flight existence check); true = update existing
-    status: 'queued'|'active'|'success'|'warning'|'error',
-    stageState: null,
+    updateVersion: false,
+    status: 'queued'|'active'|'success'|'warning'|'error'|'cancelled',
+    stageState: { stage, progress, message, lastEventAt } | null,
+    abortController: AbortController | null,
   }],
+  config: { maxFileMb: number },             // populated from GET /api/config
+  batch:  {
+    running:     boolean,
+    aborted:     boolean,                    // user pressed "Cancel remaining"
+    authExpired: boolean,                    // a 401 was seen mid-batch
+  },
 }
 ```
+
+## Concurrency & batching
+
+- The browser runs N workers in parallel (slider 1–6, default 4, persisted in `localStorage.sparkUploadConcurrency`). One bad file CAN'T halt the batch — `runBatch()`'s per-file try/catch catches everything.
+- "Cancel remaining" sets `state.batch.aborted` and aborts only **queued** files. In-flight files finish naturally.
+- A 401 anywhere in the pipeline triggers `handleAuthExpired()`: workers stop picking new files, queued files are cancelled, and a sticky toast asks the user to re-Connect with a fresh token then click Retry failed.
+- The live chip bar (Queued / In progress / Done / Failed) is recomputed by `recomputeBatchSummary()` whenever a file's status changes.
+- The idle-timer sweep (5s interval) renders an "idle for Ns" sub-line on any active card whose last SSE event is more than 30s old.
 
 ## Feature: updateVersion checkbox
 
 Each file in Step 2 has an "Update?" checkbox (default: unchecked = New).
 
-- **Unchecked (New)**: server calls `GET /api/v3/folders/{folder}/services` before uploading to check if a service with that name already exists. If it does, upload is aborted with a clear error message telling the user to tick the box.
+- **Unchecked (New)**: server calls `GET /api/v3/folders/{folder}/services` before uploading to check if a service with that name already exists. If it does, upload is aborted with `code: 'name_conflict'`. If the existence check itself errors, upload is aborted with `code: 'precheck_failed'` (fail-safe).
 - **Checked (Update)**: skips the existence check; Spark automatically increments the version.
 
 ## Known edge cases to address
 
-- [ ] Rate limiting (429): add retry-with-backoff
-- [ ] Large files (>50 MB): pre-validate on client and show friendly error before upload
-- [ ] Token expiry mid-batch: detect 401 during upload/compile/publish and surface a "refresh your token" message
-- [ ] Service name conflicts on update (409): surface helpful error
-- [ ] Compilation errors: surface the actual `last_error_message` from Spark
-- [ ] Folder creation: currently users must pre-create folders in Spark; add a "New folder" option
-- [ ] Concurrent uploads: currently sequential; could parallelise with configurable concurrency
-- [ ] Progress persistence: if the page is refreshed mid-upload, state is lost
-- [ ] Version bump type: currently hardcoded to `minor`; expose major/minor/patch selector
+- [x] ~~Rate limiting (429): add retry-with-backoff~~ — done in `withRetry`, honours `Retry-After`.
+- [x] ~~Large files: pre-validate on client and show friendly error before upload~~ — front-end checks against `GET /api/config`.
+- [x] ~~Token expiry mid-batch: detect 401 and surface a "refresh your token" message~~ — `code: 401` triggers `handleAuthExpired()`.
+- [x] ~~Concurrent uploads~~ — worker pool, slider 1–6.
+- [ ] Service name conflicts on update (409): surface helpful error.
+- [x] ~~Compilation errors: surface the actual `last_error_message` from Spark~~ — already wired; now also passes through `error_code`.
+- [ ] Folder creation: currently users must pre-create folders in Spark; add a "New folder" option.
+- [ ] Progress persistence: if the page is refreshed mid-upload, state is lost.
+- [ ] Version bump type: currently hardcoded to `minor`; expose major/minor/patch selector.

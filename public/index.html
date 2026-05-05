@@ -516,9 +516,108 @@
     /* Checkmark animation */
     @keyframes pop { 0% { transform: scale(.5); opacity:0; } 80% { transform: scale(1.2); } 100% { transform: scale(1); opacity:1; } }
     .pop { animation: pop .3s ease forwards; }
+
+    /* ── Concurrency slider ─────────────────────────────────────────────────── */
+    .concurrency-control {
+      display: inline-flex; align-items: center; gap: 10px;
+      font-size: 12px; color: var(--slate-600);
+      padding: 6px 10px;
+      background: var(--slate-50);
+      border: 1px solid var(--slate-200);
+      border-radius: 7px;
+    }
+    .concurrency-control label { font-weight: 600; }
+    .concurrency-control input[type="range"] {
+      width: 90px;
+      accent-color: var(--blue-600);
+      cursor: pointer;
+    }
+    .concurrency-control .conc-val {
+      font-weight: 700;
+      color: var(--blue-700);
+      min-width: 12px;
+      text-align: center;
+    }
+    .concurrency-control input[type="range"]:disabled { cursor: not-allowed; opacity: .5; }
+
+    /* ── Live batch chip bar ────────────────────────────────────────────────── */
+    .live-bar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .live-chip {
+      flex: 1; min-width: 96px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--slate-200);
+      background: #fff;
+      text-align: center;
+    }
+    .live-chip .lc-num { font-size: 22px; font-weight: 700; line-height: 1; }
+    .live-chip .lc-lbl { font-size: 11px; color: var(--slate-500); margin-top: 4px; text-transform: uppercase; letter-spacing: .5px; }
+    .live-chip.lc-queued .lc-num { color: var(--slate-600); }
+    .live-chip.lc-active .lc-num { color: var(--blue-600); }
+    .live-chip.lc-done   .lc-num { color: var(--green-600); }
+    .live-chip.lc-fail   .lc-num { color: var(--red-500); }
+    .live-chip.lc-active.has-active { animation: pulse-border 2s ease infinite; }
+
+    /* ── Idle warning sub-line on file cards ────────────────────────────────── */
+    .fc-idle {
+      font-size: 11px;
+      color: var(--amber-600);
+      font-style: italic;
+    }
+
+    /* ── Sticky auth-expired toast ──────────────────────────────────────────── */
+    .auth-toast {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--red-50);
+      color: var(--red-600);
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: var(--shadow-lg);
+      z-index: 1000;
+      display: none;
+      max-width: 560px;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .auth-toast.show { display: flex; }
+    .auth-toast .at-icon { font-size: 16px; }
+    .auth-toast .at-close {
+      margin-left: 8px;
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--red-600);
+      opacity: .7;
+      background: none;
+      border: none;
+      font-size: 14px;
+    }
+    .auth-toast .at-close:hover { opacity: 1; }
+
+    /* ── Cancelled card styling ─────────────────────────────────────────────── */
+    .file-card.cancelled { border-color: var(--slate-300); opacity: .7; }
+    .badge-cancelled { background: var(--slate-200); color: var(--slate-600); }
   </style>
 </head>
 <body>
+
+<!-- ── Sticky auth-expired toast ─────────────────────────────────────────────── -->
+<div class="auth-toast" id="auth-toast" role="alert">
+  <span class="at-icon">🔒</span>
+  <span id="auth-toast-msg">Token expired — paste a fresh token in Step 1, click <strong>Connect</strong>, then click <strong>Retry failed</strong>.</span>
+  <button class="at-close" id="auth-toast-close" aria-label="Dismiss">✕</button>
+</div>
+
 <div class="app">
 
   <!-- ── Header ──────────────────────────────────────────────────────────────── -->
@@ -656,9 +755,16 @@
           <div class="divider"></div>
           <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
             <button class="btn btn-secondary" id="btn-back-connect">← Back</button>
-            <button class="btn btn-primary btn-lg" id="btn-start-upload" disabled>
-              ⬆️ Upload <span id="upload-count-label">0</span> Files
-            </button>
+            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+              <span class="concurrency-control" title="How many uploads to run at the same time">
+                <label for="concurrency-slider">Parallel</label>
+                <input type="range" id="concurrency-slider" min="1" max="6" value="4" />
+                <span class="conc-val" id="concurrency-val">4</span>
+              </span>
+              <button class="btn btn-primary btn-lg" id="btn-start-upload" disabled>
+                ⬆️ Upload <span id="upload-count-label">0</span> Files
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -673,10 +779,21 @@
       <div class="overall-bar-wrap">
         <div class="overall-label">
           <span class="title">📤 Uploading to Coherent Spark</span>
-          <span class="count" id="overall-count">0 / 0</span>
+          <span style="display:flex; align-items:center; gap:10px;">
+            <span class="count" id="overall-count">0 / 0</span>
+            <button class="btn btn-danger btn-sm" id="btn-cancel-batch" style="display:none;">⏹ Cancel remaining</button>
+          </span>
         </div>
         <div class="bar-track">
           <div class="bar-fill" id="overall-fill"></div>
+        </div>
+
+        <!-- Live batch chip bar -->
+        <div class="live-bar" id="live-bar">
+          <div class="live-chip lc-queued"><div class="lc-num" id="lc-queued">0</div><div class="lc-lbl">Queued</div></div>
+          <div class="live-chip lc-active"><div class="lc-num" id="lc-active">0</div><div class="lc-lbl">In progress</div></div>
+          <div class="live-chip lc-done"><div class="lc-num" id="lc-done">0</div><div class="lc-lbl">Done</div></div>
+          <div class="live-chip lc-fail"><div class="lc-num" id="lc-fail">0</div><div class="lc-lbl">Failed</div></div>
         </div>
       </div>
 
@@ -720,15 +837,68 @@ const state = {
   token:    '',
   apiKey:   '',
   folders:  [],        // [{ id, name }]
-  files:    [],        // [{ id, file, serviceName, folder, status, stageState }]
+  files:    [],        // [{ id, file, serviceName, folder, updateVersion, status, stageState, abortController }]
+  config:   { maxFileMb: 300 },  // populated from GET /api/config
+  batch: {
+    running:      false,
+    aborted:      false,    // user pressed "Cancel remaining"
+    authExpired:  false,    // a 401 was seen mid-batch
+  },
 };
 
 let nextFileId = 1;
+let idleTimer  = null;  // interval id for the stageState idle-warning sweep
+
+// ─── Concurrency persistence ─────────────────────────────────────────────────
+
+const CONCURRENCY_KEY = 'sparkUploadConcurrency';
+const CONCURRENCY_MIN = 1;
+const CONCURRENCY_MAX = 6;
+const CONCURRENCY_DEFAULT = 4;
+
+function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+function getStoredConcurrency() {
+  const raw = Number(localStorage.getItem(CONCURRENCY_KEY));
+  if (!Number.isFinite(raw)) return CONCURRENCY_DEFAULT;
+  return clamp(raw, CONCURRENCY_MIN, CONCURRENCY_MAX);
+}
 
 // ─── DOM shortcuts ────────────────────────────────────────────────────────────
 
 const $  = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
+
+// ─── Server config (max file size etc.) ──────────────────────────────────────
+
+(async function loadConfig() {
+  try {
+    const resp = await fetch('/api/config');
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && Number.isFinite(data.maxFileMb)) {
+        state.config.maxFileMb = data.maxFileMb;
+      }
+    }
+  } catch {
+    // Non-fatal — fall back to the default 300 MB constant.
+  }
+})();
+
+// ─── Concurrency slider ───────────────────────────────────────────────────────
+
+(function initConcurrencySlider() {
+  const slider = $('#concurrency-slider');
+  const valLbl = $('#concurrency-val');
+  if (!slider || !valLbl) return;
+  const initial = getStoredConcurrency();
+  slider.value = String(initial);
+  valLbl.textContent = String(initial);
+  slider.addEventListener('input', () => {
+    const v = clamp(Number(slider.value) || CONCURRENCY_DEFAULT, CONCURRENCY_MIN, CONCURRENCY_MAX);
+    valLbl.textContent = String(v);
+    localStorage.setItem(CONCURRENCY_KEY, String(v));
+  });
+})();
 
 // ─── Step navigation ─────────────────────────────────────────────────────────
 
@@ -931,20 +1101,48 @@ dropZone.addEventListener('drop', e => {
 
 function addFiles(newFiles) {
   clearAlert('files-error');
+
+  const maxMb    = state.config.maxFileMb;
+  const maxBytes = maxMb * 1024 * 1024;
+  const tooBig   = [];
+  let   added    = 0;
+
   newFiles.forEach(file => {
     // Avoid duplicates by name
     if (state.files.find(f => f.file.name === file.name)) return;
+
+    if (file.size > maxBytes) {
+      tooBig.push(`${file.name} (${formatBytes(file.size)})`);
+      return;
+    }
+
     const stem = file.name.replace(/\.(xlsx|xls|xlsm)$/i, '');
     state.files.push({
-      id:            nextFileId++,
+      id:               nextFileId++,
       file,
-      serviceName:   stem,
-      folder:        '',
-      updateVersion: false,    // false = create new (fail if exists); true = update existing
-      status:        'queued', // queued | active | success | warning | error
-      stageState:    null,
+      serviceName:      stem,
+      folder:           '',
+      updateVersion:    false,    // false = create new (fail if exists); true = update existing
+      status:           'queued', // queued | active | success | warning | error | cancelled
+      stageState:       null,     // { stage, progress, message, lastEventAt }
+      abortController:  null,
     });
+    added++;
   });
+
+  if (tooBig.length) {
+    showAlert(
+      'files-error', 'error', '⚠️',
+      `Skipped ${tooBig.length} file${tooBig.length === 1 ? '' : 's'} over the ${maxMb} MB per-file limit:\n  • ${tooBig.join('\n  • ')}`
+    );
+  } else if (state.files.length > 50) {
+    // Soft warning — not a hard cap.
+    showAlert(
+      'files-error', 'warning', '💡',
+      `You've queued ${state.files.length} files. The default parallelism is 4; adjust the slider if you want it higher.`
+    );
+  }
+
   renderFileTable();
   updateUploadButton();
 }
@@ -1068,43 +1266,204 @@ function updateUploadButton() {
 // ─── Start Upload ─────────────────────────────────────────────────────────────
 
 $('#btn-start-upload').addEventListener('click', startUpload);
+$('#btn-cancel-batch').addEventListener('click', cancelBatch);
 
 async function startUpload() {
-  const toUpload = state.files.filter(f => f.serviceName && f.folder);
+  const toUpload = state.files.filter(f => f.serviceName && f.folder && f.status !== 'cancelled');
   if (!toUpload.length) return;
+
+  // Reset any in-flight batch state from a prior run.
+  state.batch.aborted     = false;
+  state.batch.authExpired = false;
+  hideAuthToast();
+
+  // Mark every entry to be uploaded as queued so the live chip counts are right
+  // (this also covers "Upload again" or repeat clicks).
+  toUpload.forEach(e => { e.status = 'queued'; e.stageState = null; });
 
   goToStep(3);
   buildProgressCards(toUpload);
-  updateOverallBar(0, toUpload.length);
+  $('#summary-section').classList.add('hidden');
+  $('#overall-fill').classList.remove('success');
+  setConcurrencyDisabled(true);
+  setCancelButtonVisible(true);
+  startIdleSweep();
 
-  let done = 0, successes = 0, warnings = 0, failures = 0;
+  await runBatch(toUpload);
 
-  for (const entry of toUpload) {
-    setCardStatus(entry.id, 'active');
-    try {
-      await uploadFile(entry);
-      if (entry.status === 'success')      { successes++; }
-      else if (entry.status === 'warning') { warnings++;  }
-      else                                  { failures++;  }
-    } catch (err) {
-      setCardError(entry.id, err.message);
-      failures++;
+  setConcurrencyDisabled(false);
+  setCancelButtonVisible(false);
+  stopIdleSweep();
+  renderFinalSummary();
+}
+
+/**
+ * Run a list of file entries through the upload pipeline using a worker pool.
+ * Used by both the initial upload and the Retry-failed flow.
+ *
+ * Per-file errors are caught here so one bad file can NEVER halt the batch.
+ * Workers honour state.batch.aborted / authExpired by stopping early.
+ */
+async function runBatch(entries) {
+  state.batch.running = true;
+  const concurrency   = clamp(getStoredConcurrency(), CONCURRENCY_MIN, CONCURRENCY_MAX);
+  const total         = state.files.filter(f => f.folder && f.serviceName).length;
+  let   nextIdx       = 0;
+
+  recomputeBatchSummary();
+  refreshOverall(total);
+
+  async function worker() {
+    while (true) {
+      if (state.batch.aborted || state.batch.authExpired) return;
+      const i = nextIdx++;
+      if (i >= entries.length) return;
+
+      const entry = entries[i];
+      // Skip entries that another path already terminated (e.g. cancelled while queued).
+      if (entry.status === 'cancelled' || entry.status === 'success' || entry.status === 'warning') {
+        continue;
+      }
+
+      setCardStatus(entry.id, 'active');
+      recomputeBatchSummary();
+
+      try {
+        await uploadFile(entry);
+      } catch (err) {
+        // AbortError surfaces here when the user cancels the batch.
+        if (err && err.name === 'AbortError') {
+          if (entry.status !== 'cancelled') markCancelled(entry);
+        } else {
+          setCardError(entry.id, err?.message || 'Unexpected error');
+        }
+      }
+
+      recomputeBatchSummary();
+      refreshOverall(total);
     }
-    done++;
-    updateOverallBar(done, toUpload.length);
   }
 
-  // Show summary
+  const workers = Array.from({ length: concurrency }, () => worker());
+  await Promise.all(workers);
+  state.batch.running = false;
+}
+
+function refreshOverall(total) {
+  const finished = state.files.filter(f =>
+    f.status === 'success' || f.status === 'warning' || f.status === 'error' || f.status === 'cancelled'
+  ).length;
+  updateOverallBar(finished, total);
+}
+
+function renderFinalSummary() {
+  const allEntries = state.files.filter(f => f.folder && f.serviceName);
+  const successes  = allEntries.filter(f => f.status === 'success').length;
+  const warnings   = allEntries.filter(f => f.status === 'warning').length;
+  const failures   = allEntries.filter(f => f.status === 'error').length;
+
   $('#sum-ok').textContent   = successes;
   $('#sum-warn').textContent = warnings;
   $('#sum-fail').textContent = failures;
   $('#summary-section').classList.remove('hidden');
 
-  // Update overall bar colour
   if (failures === 0) $('#overall-fill').classList.add('success');
+  $('#btn-retry-failed').style.display = failures > 0 ? 'inline-flex' : 'none';
+}
 
-  const retryBtn = $('#btn-retry-failed');
-  retryBtn.style.display = failures > 0 ? 'inline-flex' : 'none';
+function setConcurrencyDisabled(disabled) {
+  const slider = $('#concurrency-slider');
+  if (slider) slider.disabled = disabled;
+}
+
+function setCancelButtonVisible(visible) {
+  $('#btn-cancel-batch').style.display = visible ? 'inline-flex' : 'none';
+}
+
+function cancelBatch() {
+  if (!state.batch.running) return;
+  state.batch.aborted = true;
+  // Cancel everything still queued. In-flight files finish naturally.
+  state.files.forEach(entry => {
+    if (entry.status === 'queued') markCancelled(entry);
+  });
+  recomputeBatchSummary();
+}
+
+function markCancelled(entry) {
+  entry.status = 'cancelled';
+  if (entry.abortController) {
+    try { entry.abortController.abort(); } catch { /* already aborted */ }
+  }
+  setCardStatus(entry.id, 'cancelled');
+  setCardDetail(entry.id, 'warning', '⏹ Cancelled');
+}
+
+// ─── Live batch summary chip bar ─────────────────────────────────────────────
+
+function recomputeBatchSummary() {
+  const queued  = state.files.filter(f => f.status === 'queued').length;
+  const active  = state.files.filter(f => f.status === 'active').length;
+  const done    = state.files.filter(f => f.status === 'success' || f.status === 'warning').length;
+  const failed  = state.files.filter(f => f.status === 'error').length;
+
+  const setNum = (id, n) => { const el = $('#' + id); if (el) el.textContent = String(n); };
+  setNum('lc-queued', queued);
+  setNum('lc-active', active);
+  setNum('lc-done',   done);
+  setNum('lc-fail',   failed);
+
+  const activeChip = document.querySelector('.live-chip.lc-active');
+  if (activeChip) activeChip.classList.toggle('has-active', active > 0);
+}
+
+// ─── Auth-expired toast ──────────────────────────────────────────────────────
+
+$('#auth-toast-close').addEventListener('click', hideAuthToast);
+
+function showAuthToast(customMsg) {
+  const toast = $('#auth-toast');
+  if (!toast) return;
+  if (customMsg) $('#auth-toast-msg').textContent = customMsg;
+  toast.classList.add('show');
+}
+function hideAuthToast() {
+  const toast = $('#auth-toast');
+  if (toast) toast.classList.remove('show');
+}
+
+function handleAuthExpired() {
+  if (state.batch.authExpired) return;   // already handled
+  state.batch.authExpired = true;
+  // Cancel queued entries — workers will see authExpired and exit; in-flight finish naturally.
+  state.files.forEach(entry => {
+    if (entry.status === 'queued') markCancelled(entry);
+  });
+  showAuthToast();
+}
+
+// ─── Idle-timer sweep ────────────────────────────────────────────────────────
+
+function startIdleSweep() {
+  stopIdleSweep();
+  idleTimer = setInterval(() => {
+    const now = Date.now();
+    state.files.forEach(entry => {
+      if (entry.status !== 'active' || !entry.stageState) return;
+      const elapsed = now - (entry.stageState.lastEventAt || 0);
+      const idleEl = document.getElementById(`idle-${entry.id}`);
+      if (!idleEl) return;
+      if (elapsed > 30_000) {
+        idleEl.textContent = `Idle for ${Math.round(elapsed / 1000)}s — still waiting on Spark…`;
+        idleEl.style.display = '';
+      } else {
+        idleEl.style.display = 'none';
+      }
+    });
+  }, 5_000);
+}
+function stopIdleSweep() {
+  if (idleTimer) { clearInterval(idleTimer); idleTimer = null; }
 }
 
 // ─── Progress Cards ───────────────────────────────────────────────────────────
@@ -1138,6 +1497,7 @@ function buildProgressCards(entries) {
         <div class="fc-compile-label" id="compile-lbl-${entry.id}">Compiling: 0%</div>
         <div class="fc-compile-track"><div class="fc-compile-fill" id="compile-fill-${entry.id}"></div></div>
       </div>
+      <div class="fc-idle" id="idle-${entry.id}" style="display:none;"></div>
       <div class="fc-detail hidden" id="detail-${entry.id}"></div>
     `;
     container.appendChild(card);
@@ -1153,10 +1513,18 @@ function setCardStatus(fileId, status) {
   if (!card) return;
   card.className = `file-card ${status}`;
   const badge = $(`#badge-${fileId}`);
-  const labels = { queued:'Queued', active:'Uploading…', success:'Done ✓', warning:'Warning ⚠️', error:'Failed ✗' };
-  const classes = { queued:'badge-queued', active:'badge-active', success:'badge-success', warning:'badge-warning', error:'badge-error' };
-  badge.className = `fc-badge ${classes[status] || 'badge-queued'}`;
-  badge.textContent = labels[status] || status;
+  const labels  = { queued:'Queued', active:'Uploading…', success:'Done ✓', warning:'Warning ⚠️', error:'Failed ✗', cancelled:'Cancelled' };
+  const classes = { queued:'badge-queued', active:'badge-active', success:'badge-success', warning:'badge-warning', error:'badge-error', cancelled:'badge-cancelled' };
+  if (badge) {
+    badge.className = `fc-badge ${classes[status] || 'badge-queued'}`;
+    badge.textContent = labels[status] || status;
+  }
+  // Update the underlying state entry so summary recompute sees the change.
+  const entry = state.files.find(f => f.id === fileId);
+  if (entry) entry.status = status;
+  // Hide the idle warning when the card is no longer active.
+  const idleEl = document.getElementById(`idle-${fileId}`);
+  if (idleEl && status !== 'active') idleEl.style.display = 'none';
 }
 
 function setChip(stage, fileId, chipStatus, labelOverride) {
@@ -1202,6 +1570,10 @@ function updateOverallBar(done, total) {
 // ─── Upload a single file (SSE stream) ───────────────────────────────────────
 
 async function uploadFile(entry) {
+  // Fresh AbortController for this attempt (Retry-failed reuses uploadFile).
+  entry.abortController = new AbortController();
+  entry.stageState = { stage: 'upload', progress: 0, message: 'Starting…', lastEventAt: Date.now() };
+
   const formData = new FormData();
   formData.append('file',          entry.file);
   formData.append('baseUrl',       state.baseUrl);
@@ -1216,7 +1588,11 @@ async function uploadFile(entry) {
   const badge = $(`#badge-${entry.id}`);
   if (badge) badge.textContent = 'Uploading…';
 
-  const resp = await fetch('/api/upload-stream', { method: 'POST', body: formData });
+  const resp = await fetch('/api/upload-stream', {
+    method: 'POST',
+    body:   formData,
+    signal: entry.abortController.signal,
+  });
 
   if (!resp.ok && !resp.body) {
     throw new Error(`Server error: HTTP ${resp.status}`);
@@ -1244,10 +1620,19 @@ async function uploadFile(entry) {
 }
 
 function handleProgressEvent(entry, event) {
+  // Stamp lastEventAt on every event so the idle-timer sweep doesn't false-alarm.
+  if (entry.stageState) entry.stageState.lastEventAt = Date.now();
+  else entry.stageState = { stage: 'upload', progress: 0, message: '', lastEventAt: Date.now() };
+
   switch (event.type) {
 
     case 'stage': {
-      const { stage, status, progress, message } = event;
+      const { stage, status, progress, message, bytesLoaded, bytesTotal } = event;
+
+      // Maintain stageState so the idle timer + future tooltips have data.
+      entry.stageState.stage    = stage;
+      entry.stageState.progress = progress ?? entry.stageState.progress;
+      entry.stageState.message  = message  || '';
 
       // Update badge with current action
       const badge = $(`#badge-${entry.id}`);
@@ -1255,9 +1640,20 @@ function handleProgressEvent(entry, event) {
       if (badge && status === 'active') badge.textContent = actionLabel[stage] || 'Working…';
 
       if (status === 'active') {
-        setChip(stage, entry.id, 'active', stage === 'compile' && progress != null
-          ? `Compile <span class="chip-pct">${progress}%</span>` : null);
+        let chipLabel = null;
+        if (stage === 'upload' && progress != null) {
+          chipLabel = `Upload <span class="chip-pct">${progress}%</span>`;
+        } else if (stage === 'compile' && progress != null) {
+          chipLabel = `Compile <span class="chip-pct">${progress}%</span>`;
+        }
+        setChip(stage, entry.id, 'active', chipLabel);
         if (stage === 'compile' && progress != null) updateCompileBar(entry.id, progress);
+
+        // Show byte-progress detail line for uploads of meaningful size.
+        if (stage === 'upload' && bytesTotal && bytesTotal > 1024 * 1024) {
+          setCardDetail(entry.id, 'success',
+            `📤 ${formatBytes(bytesLoaded)} / ${formatBytes(bytesTotal)} (${progress ?? 0}%)`);
+        }
       } else if (status === 'done') {
         const labels = { upload:'Upload ✓', compile:'Compile ✓', publish:'Publish ✓' };
         setChip(stage, entry.id, 'done', labels[stage]);
@@ -1265,12 +1661,21 @@ function handleProgressEvent(entry, event) {
           const bar = $(`#compile-bar-${entry.id}`);
           if (bar) bar.classList.add('hidden');
         }
+        if (stage === 'upload') {
+          const detail = $(`#detail-${entry.id}`);
+          if (detail) detail.classList.add('hidden');
+        }
       }
       break;
     }
 
+    case 'heartbeat': {
+      // Only purpose is to refresh lastEventAt — already done above.
+      break;
+    }
+
     case 'done': {
-      const { status, executeUrl, versionId, message, folder, serviceName } = event;
+      const { status, executeUrl, versionId, message } = event;
 
       if (status === 'success') {
         entry.status = 'success';
@@ -1292,8 +1697,12 @@ function handleProgressEvent(entry, event) {
     }
 
     case 'error': {
+      const { stage, message, code } = event;
+
+      // 401 anywhere = token expired. Halt the batch but let in-flight finish.
+      if (code === 401) handleAuthExpired();
+
       entry.status = 'error';
-      const { stage, message } = event;
       if (stage) setChip(stage, entry.id, 'error');
       setCardError(entry.id, message || 'Unknown error');
       break;
@@ -1304,12 +1713,13 @@ function handleProgressEvent(entry, event) {
 // ─── Retry Failed ────────────────────────────────────────────────────────────
 
 $('#btn-retry-failed').addEventListener('click', async () => {
-  const failed = state.files.filter(f => f.status === 'error');
+  const failed = state.files.filter(f => f.status === 'error' || f.status === 'cancelled');
   if (!failed.length) return;
 
-  // Reset their cards
+  // Reset every retry candidate's card and state.
   failed.forEach(entry => {
-    entry.status = 'queued';
+    entry.status     = 'queued';
+    entry.stageState = null;
     const card = $(`#card-${entry.id}`);
     if (card) {
       card.className = 'file-card';
@@ -1321,53 +1731,47 @@ $('#btn-retry-failed').addEventListener('click', async () => {
       });
       const detail = $(`#detail-${entry.id}`);
       if (detail) detail.classList.add('hidden');
+      const idle = document.getElementById(`idle-${entry.id}`);
+      if (idle) idle.style.display = 'none';
     }
   });
 
+  // Reset batch flags so workers run again. The user is expected to have re-Connect-ed
+  // if the previous run halted on 401 — uploadFile reads state.token at fetch time.
+  state.batch.aborted     = false;
+  state.batch.authExpired = false;
+  hideAuthToast();
+
   $('#summary-section').classList.add('hidden');
   $('#btn-retry-failed').style.display = 'none';
+  $('#overall-fill').classList.remove('success');
+  setConcurrencyDisabled(true);
+  setCancelButtonVisible(true);
+  startIdleSweep();
 
-  const total = state.files.filter(f => f.folder && f.serviceName).length;
-  let done = state.files.filter(f => f.status === 'success' || f.status === 'warning').length;
-  updateOverallBar(done, total);
+  await runBatch(failed);
 
-  let successes = 0, warnings = 0, failures = 0;
-
-  for (const entry of failed) {
-    setCardStatus(entry.id, 'active');
-    try {
-      await uploadFile(entry);
-      if (entry.status === 'success')      successes++;
-      else if (entry.status === 'warning') warnings++;
-      else                                  failures++;
-    } catch (err) {
-      setCardError(entry.id, err.message);
-      failures++;
-    }
-    done++;
-    updateOverallBar(done, total);
-  }
-
-  // Recalculate full totals
-  const allEntries = state.files.filter(f => f.folder && f.serviceName);
-  $('#sum-ok').textContent   = allEntries.filter(f => f.status === 'success').length;
-  $('#sum-warn').textContent = allEntries.filter(f => f.status === 'warning').length;
-  $('#sum-fail').textContent = allEntries.filter(f => f.status === 'error').length;
-  $('#summary-section').classList.remove('hidden');
-  if (failures === 0) $('#overall-fill').classList.add('success');
-  if (failures > 0) $('#btn-retry-failed').style.display = 'inline-flex';
+  setConcurrencyDisabled(false);
+  setCancelButtonVisible(false);
+  stopIdleSweep();
+  renderFinalSummary();
 });
 
 // ─── Upload Again ─────────────────────────────────────────────────────────────
 
 $('#btn-upload-again').addEventListener('click', () => {
   state.files = [];
+  state.batch.aborted     = false;
+  state.batch.authExpired = false;
+  state.batch.running     = false;
+  hideAuthToast();
   renderFileTable();
   updateUploadButton();
   $('#file-cards').innerHTML = '';
   $('#overall-fill').style.width = '0%';
   $('#overall-fill').classList.remove('success');
   $('#summary-section').classList.add('hidden');
+  recomputeBatchSummary();
   fileInput.value = '';
   goToStep(2);
 });

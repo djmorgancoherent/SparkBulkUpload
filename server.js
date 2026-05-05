@@ -6,6 +6,7 @@
  * with real-time Server-Sent Events (SSE) progress streaming.
  *
  * Endpoints:
+ *   GET  /api/config          — Returns shared client/server config (max file size, etc.)
  *   POST /api/list-folders    — Fetches all Spark folders for a tenant
  *   POST /api/upload-stream   — Uploads a file and streams pipeline progress via SSE
  *
@@ -13,6 +14,16 @@
  *   npm install
  *   node server.js
  *   Open http://localhost:3000
+ *
+ * Tunables (all optional; sensible defaults):
+ *   PORT                          - HTTP port (default 3000)
+ *   MAX_FILE_MB                   - Per-file size limit, megabytes (default 300)
+ *   UPLOAD_TIMEOUT_MS             - Upload POST axios timeout (default 30 min)
+ *   COMPILE_TIMEOUT_MS            - Total compile-polling budget (default 15 min)
+ *   COMPILE_POLL_MS               - Interval between compile polls (default 3 s)
+ *   COMPILE_MAX_TRANSIENT_ERRORS  - Consecutive poll failures before bailing (default 8)
+ *   RETRY_MAX_ATTEMPTS            - Total attempts (incl. first try) for retryable calls (default 4)
+ *   RETRY_BASE_MS                 - Base for exponential backoff (default 1000)
  */
 
 'use strict';
@@ -28,18 +39,73 @@ const { v4: uuidv4 } = require('uuid');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+const CONFIG = {
+  MAX_FILE_MB:                  num(process.env.MAX_FILE_MB,                  300),
+  UPLOAD_TIMEOUT_MS:            num(process.env.UPLOAD_TIMEOUT_MS,            30 * 60_000),
+  COMPILE_TIMEOUT_MS:           num(process.env.COMPILE_TIMEOUT_MS,           15 * 60_000),
+  COMPILE_POLL_MS:              num(process.env.COMPILE_POLL_MS,              3_000),
+  COMPILE_MAX_TRANSIENT_ERRORS: num(process.env.COMPILE_MAX_TRANSIENT_ERRORS, 8),
+  RETRY_MAX_ATTEMPTS:           num(process.env.RETRY_MAX_ATTEMPTS,           4),
+  RETRY_BASE_MS:                num(process.env.RETRY_BASE_MS,                1_000),
+};
+
+function num(v, d) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : d;
+}
+
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Multer — stores uploaded files in /tmp, up to 200 MB each
+// Multer — stores uploaded files in /tmp, up to MAX_FILE_MB each
 const upload = multer({
   dest: '/tmp/spark-bulk-uploads/',
-  limits: { fileSize: 200 * 1024 * 1024 },
+  limits: { fileSize: CONFIG.MAX_FILE_MB * 1024 * 1024 },
 });
 
 fs.mkdirSync('/tmp/spark-bulk-uploads', { recursive: true });
+
+/**
+ * Wrap upload.single('file') so a multer rejection (e.g. file too large) becomes
+ * a graceful SSE error instead of an uncaught exception. We open the SSE response
+ * here ourselves, emit one error event, then end. Client-side pre-flight makes
+ * this rare but the degraded path must still be friendly.
+ */
+function uploadOrSseError(field) {
+  const single = upload.single(field);
+  return (req, res, next) => {
+    single(req, res, (err) => {
+      if (!err) return next();
+
+      const isMulter = err instanceof multer.MulterError;
+      const isTooLarge = isMulter && err.code === 'LIMIT_FILE_SIZE';
+
+      // If the response hasn't started, emit a graceful SSE error.
+      if (!res.headersSent) {
+        res.setHeader('Content-Type',  'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection',    'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders();
+        res.write(`data: ${JSON.stringify({
+          type: 'error',
+          stage: 'upload',
+          code: isTooLarge ? 'file_too_large' : 'multer_error',
+          message: isTooLarge
+            ? `File exceeds the ${CONFIG.MAX_FILE_MB} MB per-file limit.`
+            : `Upload pre-processing failed: ${err.message}`,
+        })}\n\n`);
+        res.end();
+      } else {
+        next(err);
+      }
+    });
+  };
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -109,6 +175,86 @@ function formatAxiosError(err) {
   if (code === 409) msg += '\n💡 A service with this name may already exist. Try a different name.';
   return msg;
 }
+
+// ─── Retry helper ─────────────────────────────────────────────────────────────
+
+/** Network-level errors that are worth retrying. */
+const RETRYABLE_NET_CODES = new Set([
+  'ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EAI_AGAIN', 'EPIPE',
+]);
+/** HTTP statuses that are worth retrying. 401 is intentionally NOT here so it surfaces fast. */
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+
+function isRetryable(err) {
+  const status = err?.response?.status;
+  if (status && RETRYABLE_STATUSES.has(status)) return true;
+  if (!err?.response && err?.code && RETRYABLE_NET_CODES.has(err.code)) return true;
+  return false;
+}
+
+/**
+ * Parse a Retry-After header. RFC 7231 allows seconds (delta) or HTTP-date.
+ * Returns ms, or null if unparseable.
+ */
+function parseRetryAfter(value) {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 60_000);
+  const dateMs = Date.parse(value);
+  if (!Number.isNaN(dateMs)) {
+    const delta = dateMs - Date.now();
+    return delta > 0 ? Math.min(delta, 60_000) : 0;
+  }
+  return null;
+}
+
+/**
+ * Run `fn(attempt)` up to `maxAttempts` times with exponential backoff.
+ *
+ * @param {string}   label                 - human-readable label for logs
+ * @param {Function} fn                    - async function that returns the success value
+ * @param {object}   opts
+ * @param {number}   [opts.maxAttempts]    - default CONFIG.RETRY_MAX_ATTEMPTS
+ * @param {number}   [opts.baseMs]         - default CONFIG.RETRY_BASE_MS
+ * @param {Function} [opts.onAttempt]      - (attempt, delayMs, err) → void; called before each retry sleep
+ */
+async function withRetry(label, fn, opts = {}) {
+  const maxAttempts = opts.maxAttempts ?? CONFIG.RETRY_MAX_ATTEMPTS;
+  const baseMs      = opts.baseMs      ?? CONFIG.RETRY_BASE_MS;
+
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    try {
+      return await fn(attempt);
+    } catch (err) {
+      const exhausted = attempt >= maxAttempts;
+      if (exhausted || !isRetryable(err)) throw err;
+
+      // Honour Retry-After for 429s; otherwise exp backoff capped at 10s.
+      const status = err.response?.status;
+      const retryAfter = status === 429 ? parseRetryAfter(err.response?.headers?.['retry-after']) : null;
+      const backoff    = Math.min(baseMs * Math.pow(2, attempt - 1), 10_000);
+      const delayMs    = retryAfter ?? backoff;
+
+      console.warn(`   ↻ ${label} attempt ${attempt}/${maxAttempts} failed (${status ?? err.code ?? err.message}); retrying in ${delayMs}ms`);
+      if (typeof opts.onAttempt === 'function') {
+        try { opts.onAttempt(attempt, delayMs, err); } catch { /* swallow */ }
+      }
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+}
+
+// ─── Route: Config ────────────────────────────────────────────────────────────
+
+app.get('/api/config', (_req, res) => {
+  res.json({
+    maxFileMb:        CONFIG.MAX_FILE_MB,
+    uploadTimeoutMs:  CONFIG.UPLOAD_TIMEOUT_MS,
+    compileTimeoutMs: CONFIG.COMPILE_TIMEOUT_MS,
+  });
+});
 
 // ─── Route: List Folders ─────────────────────────────────────────────────────
 
@@ -209,7 +355,7 @@ app.post('/api/list-folders', async (req, res) => {
 
 // ─── Route: Upload Stream (SSE) ──────────────────────────────────────────────
 
-app.post('/api/upload-stream', upload.single('file'), async (req, res) => {
+app.post('/api/upload-stream', uploadOrSseError('file'), async (req, res) => {
   // Switch response to Server-Sent Events
   res.setHeader('Content-Type',  'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -234,7 +380,19 @@ app.post('/api/upload-stream', upload.single('file'), async (req, res) => {
 
   /** Clean up temp file on disk. */
   const cleanup = () => {
-    if (tempFilePath) fs.unlink(tempFilePath, () => {});
+    if (!tempFilePath) return;
+    fs.unlink(tempFilePath, (err) => {
+      if (err && err.code !== 'ENOENT') {
+        console.warn(`   cleanup: failed to unlink ${tempFilePath}: ${err.message}`);
+      }
+    });
+  };
+
+  /** Map an axios/Spark error to a code we can include in error SSE events. */
+  const errorCode = (err) => {
+    if (err?.response?.status) return err.response.status;
+    if (err?.code) return err.code;
+    return undefined;
   };
 
   try {
@@ -263,14 +421,16 @@ app.post('/api/upload-stream', upload.single('file'), async (req, res) => {
     console.log(`   Auth    : ${headers.Authorization ? 'Bearer token' : headers['x-synthetic-key'] ? 'API key' : 'NONE'}`);
 
     // ── Pre-flight: existence check (only when creating a new service) ────────
+    // Fail-safe: if the check itself errors, abort rather than silently proceeding.
     if (!isUpdate) {
       send({ type: 'stage', stage: 'upload', status: 'active', message: 'Checking service name…' });
+      const listUrl  = `${base}/api/v3/folders/${encF}/services`;
       try {
-        const listUrl  = `${base}/api/v3/folders/${encF}/services`;
-        const listResp = await axios.get(listUrl, {
+        const listResp = await withRetry('precheck', () => axios.get(listUrl, {
           headers: { ...headers, 'Content-Type': 'application/json' },
           timeout: 15_000,
-        });
+        }), { maxAttempts: 2 });
+
         const services = listResp.data?.data ?? listResp.data?.items ?? listResp.data?.response_data?.data ?? [];
         const exists   = Array.isArray(services)
           && services.some(s => (s.name ?? s.serviceName ?? '').toLowerCase() === serviceName.toLowerCase());
@@ -279,14 +439,22 @@ app.post('/api/upload-stream', upload.single('file'), async (req, res) => {
           const errMsg = `A service named "${serviceName}" already exists in folder "${folder}". ` +
                          `Tick "Update?" to add a new version to the existing service instead.`;
           console.warn(`   ⚠️  Service exists — aborting (updateVersion=false)`);
-          send({ type: 'error', stage: 'upload', message: errMsg });
-          res.end(); cleanup(); return;
+          send({ type: 'error', stage: 'precheck', code: 'name_conflict', message: errMsg });
+          res.end(); return;
         }
         console.log(`   ✅ Name available — proceeding to create`);
       } catch (checkErr) {
-        // If the existence check fails (e.g. 404 on the services list endpoint), log it
-        // but proceed rather than blocking the upload — better a potential duplicate than a hard block.
-        console.warn(`   ⚠️  Could not verify service existence (${checkErr.response?.status ?? checkErr.message}) — proceeding anyway`);
+        const code = errorCode(checkErr);
+        // 401 → surface as auth-expired so the client can halt the batch.
+        // Anything else → surface as precheck_failed (do NOT silently proceed).
+        const isAuth = checkErr.response?.status === 401;
+        const message = isAuth
+          ? `Authentication failed during pre-flight check. ${formatAxiosError(checkErr)}`
+          : `Could not verify the service name is unique (${formatAxiosError(checkErr)}). ` +
+            `Tick "Update?" if you intend to add a version to an existing service, or fix the credential / URL and retry.`;
+        console.warn(`   ⚠️  Precheck failed (${code}) — aborting upload`);
+        send({ type: 'error', stage: 'precheck', code: isAuth ? 401 : 'precheck_failed', message });
+        res.end(); return;
       }
     }
 
@@ -306,34 +474,63 @@ app.post('/api/upload-stream', upload.single('file'), async (req, res) => {
       },
     });
 
-    const formData = new FormData();
-    formData.append('engineUploadRequestEntity', metadata);
-    formData.append(
-      'serviceFile',
-      fs.createReadStream(tempFilePath),
-      {
-        filename:    originalName,
-        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      },
-    );
+    // Throttle onUploadProgress events to ~5/sec so a 250 MB upload doesn't
+    // flood the SSE channel with thousands of progress events.
+    let lastProgressEmit = 0;
+    const PROGRESS_THROTTLE_MS = 200;
 
     let uploadBody;
     try {
-      const uploadResp = await axios.post(uploadUrl, formData, {
-        headers:          { ...headers, ...formData.getHeaders() },
-        timeout:          180_000,
-        maxContentLength: Infinity,
-        maxBodyLength:    Infinity,
+      const uploadResp = await withRetry('upload', (attempt) => {
+        // FormData and the underlying read stream cannot be replayed across retries —
+        // rebuild them inside the closure so each attempt gets a fresh stream.
+        const formData = new FormData();
+        formData.append('engineUploadRequestEntity', metadata);
+        formData.append(
+          'serviceFile',
+          fs.createReadStream(tempFilePath),
+          {
+            filename:    originalName,
+            contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          },
+        );
+        if (attempt > 1) {
+          send({ type: 'stage', stage: 'upload', status: 'active',
+                 message: `Retrying upload (attempt ${attempt}/${CONFIG.RETRY_MAX_ATTEMPTS})…` });
+          lastProgressEmit = 0;
+        }
+        return axios.post(uploadUrl, formData, {
+          headers:          { ...headers, ...formData.getHeaders() },
+          timeout:          CONFIG.UPLOAD_TIMEOUT_MS,
+          maxContentLength: Infinity,
+          maxBodyLength:    Infinity,
+          onUploadProgress: (e) => {
+            const total = e.total || req.file.size || 0;
+            if (!total) return;
+            const now = Date.now();
+            const isFinal = e.loaded >= total;
+            if (!isFinal && now - lastProgressEmit < PROGRESS_THROTTLE_MS) return;
+            lastProgressEmit = now;
+            const pct = Math.round((e.loaded / total) * 100);
+            send({
+              type: 'stage', stage: 'upload', status: 'active',
+              progress: pct,
+              bytesLoaded: e.loaded,
+              bytesTotal:  total,
+              message: `Uploading… ${pct}%`,
+            });
+          },
+        });
       });
       uploadBody = uploadResp.data;
       console.log(`   ✅ Upload HTTP ${uploadResp.status}`);
     } catch (err) {
-      const code = err.response?.status;
+      const code = errorCode(err);
       const body = err.response?.data;
       console.error(`   ❌ Upload failed — HTTP ${code ?? 'network error'}`);
       if (body) console.error(`   Response: ${JSON.stringify(body).slice(0, 500)}`);
       send({ type: 'error', stage: 'upload', message: formatAxiosError(err), code });
-      res.end(); cleanup(); return;
+      res.end(); return;
     }
 
     // Log the FULL raw upload response so we can diagnose any field-name surprises
@@ -355,6 +552,7 @@ app.post('/api/upload-stream', upload.single('file'), async (req, res) => {
       type:    'stage',
       stage:   'upload',
       status:  'done',
+      progress: 100,
       message: 'File uploaded successfully',
       meta: {
         sheets:  rd.no_of_sheets,
@@ -366,7 +564,7 @@ app.post('/api/upload-stream', upload.single('file'), async (req, res) => {
     if (!jobId) {
       console.warn('   ⚠️  No compilation job ID — cannot compile or publish.');
       send({ type: 'done', status: 'warning', message: 'No compilation job ID returned — check Spark console.' });
-      res.end(); cleanup(); return;
+      res.end(); return;
     }
 
     // ── Stage 2: Poll Compilation ────────────────────────────────────────────
@@ -374,24 +572,44 @@ app.post('/api/upload-stream', upload.single('file'), async (req, res) => {
 
     const compileUrl  = `${base}/api/v3/folders/${encF}/services/${encS}/getcompilationprogess/${jobId}`;
     console.log(`   Compile : GET ${compileUrl}`);
-    const compileEnd  = Date.now() + 5 * 60_000; // 5-min timeout
-    let   compileProgress = 0;
+    const compileEnd            = Date.now() + CONFIG.COMPILE_TIMEOUT_MS;
+    let   compileProgress       = 0;
+    let   consecutiveTransients = 0;
 
     while (compileProgress < 100) {
       if (Date.now() > compileEnd) {
-        send({ type: 'error', stage: 'compile', message: 'Compilation timed out after 5 minutes.' });
-        res.end(); cleanup(); return;
+        send({ type: 'error', stage: 'compile', code: 'compile_timeout',
+               message: `Compilation timed out after ${Math.round(CONFIG.COMPILE_TIMEOUT_MS / 60_000)} minutes.` });
+        res.end(); return;
       }
 
-      await new Promise(r => setTimeout(r, 3_000));
+      await new Promise(r => setTimeout(r, CONFIG.COMPILE_POLL_MS));
 
       let compileBody;
       try {
-        const compileResp = await axios.get(compileUrl, { headers, timeout: 30_000 });
-        compileBody       = compileResp.data;
+        const compileResp = await withRetry('compile-poll',
+          () => axios.get(compileUrl, { headers, timeout: 30_000 }),
+          { maxAttempts: 2 });
+        compileBody = compileResp.data;
+        consecutiveTransients = 0; // reset on any successful poll
       } catch (err) {
-        // Transient error — keep trying
-        send({ type: 'stage', stage: 'compile', status: 'active', progress: compileProgress, message: `Compiling… (retrying after error)` });
+        // 401 mid-compile is terminal — surface so the client can halt the batch.
+        if (err.response?.status === 401) {
+          console.error(`   ❌ Compile poll auth failed — surfacing 401`);
+          send({ type: 'error', stage: 'compile', code: 401,
+                 message: `Authentication failed during compilation: ${formatAxiosError(err)}` });
+          res.end(); return;
+        }
+        consecutiveTransients++;
+        const remaining = CONFIG.COMPILE_MAX_TRANSIENT_ERRORS - consecutiveTransients;
+        console.warn(`   ↻ Compile poll transient error (${consecutiveTransients}/${CONFIG.COMPILE_MAX_TRANSIENT_ERRORS}): ${err.message}`);
+        if (consecutiveTransients > CONFIG.COMPILE_MAX_TRANSIENT_ERRORS) {
+          send({ type: 'error', stage: 'compile', code: 'compile_unreachable',
+                 message: `Compilation polling failed ${consecutiveTransients} consecutive times: ${formatAxiosError(err)}` });
+          res.end(); return;
+        }
+        send({ type: 'stage', stage: 'compile', status: 'active', progress: compileProgress,
+               message: `Compiling… (transient error, ${remaining} retries left)` });
         continue;
       }
 
@@ -405,11 +623,14 @@ app.post('/api/upload-stream', upload.single('file'), async (req, res) => {
 
       console.log(`   ⚙️  Compile: ${compileProgress}%${cError ? ` — ERROR: ${cError}` : ''}`);
       send({ type: 'stage', stage: 'compile', status: 'active', progress: compileProgress, message: `Compiling: ${compileProgress}%` });
+      // Heartbeat lets the client know the server is alive even when progress hasn't moved.
+      send({ type: 'heartbeat', stage: 'compile', tsMs: Date.now() });
 
       if (cError && compileProgress < 100) {
         console.error(`   ❌ Compilation failed: ${cError}`);
-        send({ type: 'error', stage: 'compile', message: `Compilation error: ${cError}` });
-        res.end(); cleanup(); return;
+        const errCode = crd.error_code ?? rm?.error_code ?? 'compile_failed';
+        send({ type: 'error', stage: 'compile', code: errCode, message: `Compilation error: ${cError}` });
+        res.end(); return;
       }
     }
 
@@ -418,7 +639,7 @@ app.post('/api/upload-stream', upload.single('file'), async (req, res) => {
     // ── Stage 3: Publish ─────────────────────────────────────────────────────
     if (!origDocId || !engineDocId) {
       send({ type: 'done', status: 'warning', message: 'Missing document IDs — service compiled but could not be published.' });
-      res.end(); cleanup(); return;
+      res.end(); return;
     }
 
     send({ type: 'stage', stage: 'publish', status: 'active', message: 'Publishing service…' });
@@ -429,28 +650,34 @@ app.post('/api/upload-stream', upload.single('file'), async (req, res) => {
 
     let publishBody;
     try {
-      const publishResp = await axios.post(
-        publishUrl,
-        {
-          request_data: {
-            original_file_documentid: origDocId,
-            engine_file_documentid:   engineDocId,
-            draft_service_name:       serviceName,
-            version_difference:       'minor',
-            effective_start_date:     publishNow,
-            effective_end_date:       '2099-12-31T00:00:00.000Z',
+      const publishResp = await withRetry('publish', (attempt) => {
+        if (attempt > 1) {
+          send({ type: 'stage', stage: 'publish', status: 'active',
+                 message: `Retrying publish (attempt ${attempt}/${CONFIG.RETRY_MAX_ATTEMPTS})…` });
+        }
+        return axios.post(
+          publishUrl,
+          {
+            request_data: {
+              original_file_documentid: origDocId,
+              engine_file_documentid:   engineDocId,
+              draft_service_name:       serviceName,
+              version_difference:       'minor',
+              effective_start_date:     publishNow,
+              effective_end_date:       '2099-12-31T00:00:00.000Z',
+            },
           },
-        },
-        { headers: { ...headers, 'Content-Type': 'application/json' }, timeout: 60_000 },
-      );
+          { headers: { ...headers, 'Content-Type': 'application/json' }, timeout: 60_000 },
+        );
+      });
       publishBody = publishResp.data;
     } catch (err) {
-      const code = err.response?.status;
+      const code = errorCode(err);
       const body = err.response?.data;
       console.error(`   ❌ Publish failed — HTTP ${code ?? 'network error'}`);
       if (body) console.error(`   Response: ${JSON.stringify(body).slice(0, 500)}`);
       send({ type: 'error', stage: 'publish', message: formatAxiosError(err), code });
-      res.end(); cleanup(); return;
+      res.end(); return;
     }
 
     const versionId  = publishBody?.response_data?.version_id;
@@ -462,7 +689,8 @@ app.post('/api/upload-stream', upload.single('file'), async (req, res) => {
     send({ type: 'done', status: 'success', versionId, executeUrl, folder, serviceName });
 
   } catch (err) {
-    send({ type: 'error', message: err.message ?? 'Unexpected server error' });
+    const code = errorCode(err);
+    send({ type: 'error', code, message: err.message ?? 'Unexpected server error' });
   } finally {
     cleanup();
     if (!res.writableEnded) res.end();
@@ -478,5 +706,8 @@ app.listen(PORT, () => {
   console.log('╠══════════════════════════════════════════════════╣');
   console.log(`║   Open: http://localhost:${PORT}                    ║`);
   console.log('╚══════════════════════════════════════════════════╝');
+  console.log(`   Max file size : ${CONFIG.MAX_FILE_MB} MB`);
+  console.log(`   Compile cap   : ${Math.round(CONFIG.COMPILE_TIMEOUT_MS / 60_000)} min`);
+  console.log(`   Retry         : up to ${CONFIG.RETRY_MAX_ATTEMPTS} attempts (base ${CONFIG.RETRY_BASE_MS}ms)`);
   console.log('');
 });
