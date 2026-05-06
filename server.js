@@ -127,6 +127,32 @@ function normaliseUrl(raw) {
   }
 }
 
+/**
+ * Build a link to the Spark UI's API Tester page for a freshly-published service.
+ * This is the page non-technical users should land on after an upload — it
+ * lets them try the service without writing any code.
+ *
+ *   excel.{env}.coherent.global/{tenant}                       ← internal API host
+ *   spark.{env}.coherent.global/{tenant}/products/{f}/{s}/api-tester/testing  ← UI
+ *
+ * Returns null if the URL can't be parsed.
+ */
+function buildApiTesterUrl(baseUrl, folder, serviceName) {
+  try {
+    const u = new URL(baseUrl);
+    if (u.hostname.startsWith('excel.')) {
+      u.hostname = 'spark.' + u.hostname.slice('excel.'.length);
+    }
+    const tenant = extractTenant(baseUrl);
+    if (!tenant) return null;
+    const encF = encodeURIComponent(folder);
+    const encS = encodeURIComponent(serviceName);
+    return `${u.protocol}//${u.host}/${tenant}/products/${encF}/${encS}/api-tester/testing`;
+  } catch {
+    return null;
+  }
+}
+
 /** Extract tenant slug from the URL path component (last segment before any sub-paths). */
 function extractTenant(baseUrl) {
   try {
@@ -331,6 +357,90 @@ async function tryListFolders(base, headers) {
   throw lastErr;
 }
 
+// ─── Route: Check Names (batch) ───────────────────────────────────────────────
+
+/**
+ * Batch existence check for service names. Used by the front-end before kicking
+ * off a bulk upload — surfaces conflicts upfront in a single round so the user
+ * can decide per file whether to add a version, rename, or skip.
+ *
+ * Request body:
+ *   {
+ *     baseUrl: string,
+ *     token?: string,
+ *     apiKey?: string,
+ *     items:  [{ id, folder, serviceName }, ...]
+ *   }
+ *
+ * Response:
+ *   {
+ *     success: true,
+ *     results: [{ id, folder, serviceName, exists, version?, latestVersionId? }, ...],
+ *     unsupported?: true   // present if the /exists endpoint isn't available on this tenant
+ *   }
+ *
+ * Calls run with limited concurrency to avoid hammering Spark for big batches.
+ */
+app.post('/api/check-names', async (req, res) => {
+  const { baseUrl, token, apiKey, items } = req.body || {};
+  if (!baseUrl)            return res.status(400).json({ success: false, error: 'baseUrl is required' });
+  if (!Array.isArray(items)) return res.status(400).json({ success: false, error: 'items must be an array' });
+
+  const base    = normaliseUrl(baseUrl);
+  const headers = buildHeaders(base, token, apiKey);
+
+  const checkOne = async (item) => {
+    const encF = encodeURIComponent(item.folder);
+    const encS = encodeURIComponent(item.serviceName);
+    const url  = `${base}/api/v3/folders/${encF}/services/${encS}/exists`;
+    try {
+      const r = await withRetry('check-exists',
+        () => axios.get(url, { headers, timeout: 15_000 }),
+        { maxAttempts: 2 });
+      const rd = r.data?.response_data ?? {};
+      return {
+        id: item.id, folder: item.folder, serviceName: item.serviceName,
+        exists:          !!rd.is_exists,
+        version:         rd.version          ?? null,
+        latestVersionId: rd.latest_version_id ?? null,
+      };
+    } catch (err) {
+      const status = err.response?.status;
+      // 401/403 are auth problems — let the caller handle those.
+      if (status === 401 || status === 403) {
+        const e = new Error(formatAxiosError(err));
+        e.status = status;
+        throw e;
+      }
+      // 404 from a misbehaving tenant or service-not-found → treat as "doesn't exist".
+      // The actual upload will surface a real conflict via Spark's 409 if there is one.
+      return {
+        id: item.id, folder: item.folder, serviceName: item.serviceName,
+        exists: false, version: null, latestVersionId: null,
+        checkFailed: true, checkStatus: status ?? err.code ?? 'network',
+      };
+    }
+  };
+
+  // Limited concurrency — don't hammer Spark with 50 simultaneous requests.
+  const CONCURRENCY = 6;
+  const results = new Array(items.length);
+  let nextIdx = 0;
+  try {
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, async () => {
+      while (true) {
+        const i = nextIdx++;
+        if (i >= items.length) return;
+        results[i] = await checkOne(items[i]);
+      }
+    }));
+    res.json({ success: true, results });
+  } catch (err) {
+    const status = err.status ?? 500;
+    res.status(status).json({ success: false, error: err.message ?? String(err) });
+  }
+});
+
 app.post('/api/list-folders', async (req, res) => {
   const { baseUrl, token, apiKey } = req.body || {};
   if (!baseUrl) {
@@ -396,9 +506,8 @@ app.post('/api/upload-stream', uploadOrSseError('file'), async (req, res) => {
   };
 
   try {
-    const { baseUrl, token, apiKey, folder, serviceName, updateVersion } = req.body || {};
+    const { baseUrl, token, apiKey, folder, serviceName } = req.body || {};
     const originalName  = req.file?.originalname ?? 'file.xlsx';
-    const isUpdate      = updateVersion === 'true';
 
     if (!req.file) {
       send({ type: 'error', message: 'No file received by server.' });
@@ -417,49 +526,14 @@ app.post('/api/upload-stream', uploadOrSseError('file'), async (req, res) => {
     console.log(`   File    : ${originalName} (${fileSizeKb})`);
     console.log(`   Folder  : ${folder}`);
     console.log(`   Service : ${serviceName}`);
-    console.log(`   Mode    : ${isUpdate ? 'update existing version' : 'create new service'}`);
     console.log(`   Auth    : ${headers.Authorization ? 'Bearer token' : headers['x-synthetic-key'] ? 'API key' : 'NONE'}`);
 
-    // ── Pre-flight: existence check (only when creating a new service) ────────
-    // Fail-safe: if the check itself errors, abort rather than silently proceeding.
-    if (!isUpdate) {
-      send({ type: 'stage', stage: 'upload', status: 'active', message: 'Checking service name…' });
-      const listUrl  = `${base}/api/v3/folders/${encF}/services`;
-      try {
-        const listResp = await withRetry('precheck', () => axios.get(listUrl, {
-          headers: { ...headers, 'Content-Type': 'application/json' },
-          timeout: 15_000,
-        }), { maxAttempts: 2 });
-
-        const services = listResp.data?.data ?? listResp.data?.items ?? listResp.data?.response_data?.data ?? [];
-        const exists   = Array.isArray(services)
-          && services.some(s => (s.name ?? s.serviceName ?? '').toLowerCase() === serviceName.toLowerCase());
-
-        if (exists) {
-          const errMsg = `A service named "${serviceName}" already exists in folder "${folder}". ` +
-                         `Tick "Update?" to add a new version to the existing service instead.`;
-          console.warn(`   ⚠️  Service exists — aborting (updateVersion=false)`);
-          send({ type: 'error', stage: 'precheck', code: 'name_conflict', message: errMsg });
-          res.end(); return;
-        }
-        console.log(`   ✅ Name available — proceeding to create`);
-      } catch (checkErr) {
-        const code = errorCode(checkErr);
-        // 401 → surface as auth-expired so the client can halt the batch.
-        // Anything else → surface as precheck_failed (do NOT silently proceed).
-        const isAuth = checkErr.response?.status === 401;
-        const message = isAuth
-          ? `Authentication failed during pre-flight check. ${formatAxiosError(checkErr)}`
-          : `Could not verify the service name is unique (${formatAxiosError(checkErr)}). ` +
-            `Tick "Update?" if you intend to add a version to an existing service, or fix the credential / URL and retry.`;
-        console.warn(`   ⚠️  Precheck failed (${code}) — aborting upload`);
-        send({ type: 'error', stage: 'precheck', code: isAuth ? 401 : 'precheck_failed', message });
-        res.end(); return;
-      }
-    }
+    // (Existence check happens upfront via POST /api/check-names — see public/index.html.
+    // By the time we reach this point, the user has already decided per file whether
+    // to add a version, rename, or skip. The serviceName here is the resolved one.)
 
     // ── Stage 1: Upload ──────────────────────────────────────────────────────
-    send({ type: 'stage', stage: 'upload', status: 'active', message: isUpdate ? 'Uploading new version to Spark…' : 'Uploading file to Spark…' });
+    send({ type: 'stage', stage: 'upload', status: 'active', message: 'Uploading file to Spark…' });
 
     const uploadUrl = `${base}/api/v3/folders/${encF}/services/${encS}/upload`;
     const nowIso    = new Date().toISOString();
@@ -680,13 +754,15 @@ app.post('/api/upload-stream', uploadOrSseError('file'), async (req, res) => {
       res.end(); return;
     }
 
-    const versionId  = publishBody?.response_data?.version_id;
-    const executeUrl = `${base}/api/v3/folders/${encF}/services/${encS}/execute`;
+    const versionId    = publishBody?.response_data?.version_id;
+    const executeUrl   = `${base}/api/v3/folders/${encF}/services/${encS}/execute`;
+    const apiTesterUrl = buildApiTesterUrl(base, folder, serviceName);
 
     console.log(`   ✅ Published! version_id: ${versionId ?? '—'}`);
-    console.log(`   🔗 Execute URL: ${executeUrl}`);
+    console.log(`   🔗 Execute URL  : ${executeUrl}`);
+    if (apiTesterUrl) console.log(`   🧪 API Tester   : ${apiTesterUrl}`);
     send({ type: 'stage', stage: 'publish', status: 'done', message: 'Published!' });
-    send({ type: 'done', status: 'success', versionId, executeUrl, folder, serviceName });
+    send({ type: 'done', status: 'success', versionId, executeUrl, apiTesterUrl, folder, serviceName });
 
   } catch (err) {
     const code = errorCode(err);

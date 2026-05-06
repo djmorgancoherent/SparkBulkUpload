@@ -10,9 +10,10 @@ A local Node.js web app that lets users drag-and-drop Excel files and bulk-uploa
 browser (public/index.html)  ←SSE→  server.js (Express proxy)  →HTTP→  Coherent Spark REST API
 ```
 
-- **`server.js`** — Express server with three endpoints:
+- **`server.js`** — Express server with four endpoints:
   - `GET  /api/config` — returns shared client/server config (`maxFileMb`, `uploadTimeoutMs`, `compileTimeoutMs`)
   - `POST /api/list-folders` — fetches all Spark folders for a tenant
+  - `POST /api/check-names` — batch existence check (uses Spark's `GET /folders/{folder}/services/{service}/exists` per item; concurrency 6)
   - `POST /api/upload-stream` — runs the upload → compile → publish pipeline, streaming SSE progress events
 - **`public/index.html`** — single-file SPA with a 3-step wizard: Connect → Configure → Upload
 - **`test-connection.js`** — standalone CLI script to verify credentials before using the UI
@@ -103,7 +104,13 @@ state = {
   folders:  [{ id, name }],
   files: [{
     id, file, serviceName, folder,
-    updateVersion: false,
+    conflict: null | {                       // populated by the conflict-resolution modal
+      exists: true,
+      version: string | null,
+      latestVersionId: string | null,
+      action: 'version' | 'rename' | 'skip',
+      renamedTo?: string,
+    },
     status: 'queued'|'active'|'success'|'warning'|'error'|'cancelled',
     stageState: { stage, progress, message, lastEventAt } | null,
     abortController: AbortController | null,
@@ -113,6 +120,7 @@ state = {
     running:     boolean,
     aborted:     boolean,                    // user pressed "Cancel remaining"
     authExpired: boolean,                    // a 401 was seen mid-batch
+    paused:      boolean,                    // user pressed "Pause"; workers wait at top of loop
   },
 }
 ```
@@ -125,12 +133,22 @@ state = {
 - The live chip bar (Queued / In progress / Done / Failed) is recomputed by `recomputeBatchSummary()` whenever a file's status changes.
 - The idle-timer sweep (5s interval) renders an "idle for Ns" sub-line on any active card whose last SSE event is more than 30s old.
 
-## Feature: updateVersion checkbox
+## Feature: conflict-resolution modal
 
-Each file in Step 2 has an "Update?" checkbox (default: unchecked = New).
+When the user clicks Upload, the front-end first hits `POST /api/check-names`
+with all `(folder, serviceName)` pairs. The server uses Spark's per-service
+`/exists` endpoint to determine which already exist. If any do, a modal opens
+listing each conflict and offering three actions per row:
 
-- **Unchecked (New)**: server calls `GET /api/v3/folders/{folder}/services` before uploading to check if a service with that name already exists. If it does, upload is aborted with `code: 'name_conflict'`. If the existence check itself errors, upload is aborted with `code: 'precheck_failed'` (fail-safe).
-- **Checked (Update)**: skips the existence check; Spark automatically increments the version.
+- **Add new version to existing service** (default) — upload proceeds with the same name; Spark auto-increments the version.
+- **Rename and create as new service** — `entry.serviceName` is replaced with the user's new name; the upload creates a fresh service.
+- **Skip this file** — `entry.status` is set to `cancelled`; the file is filtered out before `runBatch`.
+
+A "Quick set all to: Add new version / Skip" bulk control speeds things up for big batches.
+
+If `/api/check-names` fails (404 on a tenant that doesn't expose `/exists`, network error, etc.), the modal is skipped and uploads proceed; Spark itself will surface a real conflict via 409 from the upload endpoint, which the existing error path handles.
+
+`/api/v3/folders/{folder}/services/{service}/exists` returns `{ is_exists, version, latest_version_id, ... }` directly — no list-and-filter required.
 
 ## Known edge cases to address
 

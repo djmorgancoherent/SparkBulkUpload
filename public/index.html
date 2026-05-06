@@ -65,14 +65,60 @@
       flex-shrink: 0;
     }
     header .logo {
-      width: 28px; height: 28px;
-      background: var(--blue-600);
-      border-radius: 6px;
+      width: 32px; height: 32px;
       display: flex; align-items: center; justify-content: center;
-      font-weight: 700; font-size: 13px; color: #fff; letter-spacing: -.5px;
+      flex-shrink: 0;
     }
+    header .logo svg { width: 32px; height: 32px; display: block; }
     header h1 { font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
     header .subtitle { font-size: 12px; color: var(--slate-400); margin-left: 4px; }
+
+    /* ── Beta banner ─────────────────────────────────────────────────────────── */
+    .beta-banner {
+      background: var(--amber-50);
+      color: var(--amber-600);
+      border-bottom: 1px solid #fde68a;
+      padding: 7px 16px;
+      font-size: 12px;
+      text-align: center;
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+    .beta-banner strong {
+      font-weight: 700;
+      letter-spacing: .5px;
+      color: var(--amber-600);
+      margin-right: 4px;
+    }
+
+    /* ── Front-page beta notice ─────────────────────────────────────────────── */
+    .beta-notice {
+      background: var(--amber-50);
+      border: 1px solid #fde68a;
+      border-radius: var(--radius);
+      padding: 18px 22px;
+      margin-top: 20px;
+      color: var(--slate-700);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .beta-notice h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--amber-600);
+      letter-spacing: .2px;
+    }
+    .beta-notice p { margin: 8px 0; }
+    .beta-notice ul { margin: 8px 0 8px 18px; padding: 0; }
+    .beta-notice li { margin: 4px 0; }
+    .beta-notice .ack {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #fde68a;
+      font-weight: 600;
+      color: var(--slate-800);
+    }
 
     /* ── Stepper ─────────────────────────────────────────────────────────────── */
     .stepper {
@@ -607,9 +653,150 @@
     /* ── Cancelled card styling ─────────────────────────────────────────────── */
     .file-card.cancelled { border-color: var(--slate-300); opacity: .7; }
     .badge-cancelled { background: var(--slate-200); color: var(--slate-600); }
+
+    /* ── Conflict-resolution modal ──────────────────────────────────────────── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(15, 23, 42, .55);
+      display: none;
+      z-index: 999;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 40px 16px;
+      overflow-y: auto;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal-card {
+      background: #fff;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-lg);
+      width: 100%;
+      max-width: 720px;
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100vh - 80px);
+    }
+    .modal-header {
+      padding: 20px 24px 12px;
+      border-bottom: 1px solid var(--slate-200);
+    }
+    .modal-title { font-size: 16px; font-weight: 600; color: var(--slate-800); }
+    .modal-subtitle { font-size: 13px; color: var(--slate-500); margin-top: 4px; }
+    .modal-body {
+      padding: 16px 24px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .modal-footer {
+      padding: 14px 24px;
+      border-top: 1px solid var(--slate-200);
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .conflict-row {
+      padding: 12px;
+      border: 1px solid var(--slate-200);
+      border-radius: 8px;
+      margin-bottom: 10px;
+      background: var(--slate-50);
+    }
+    .conflict-row-head {
+      display: flex; gap: 10px; align-items: baseline;
+      margin-bottom: 8px;
+    }
+    .conflict-name {
+      font-weight: 600; color: var(--slate-800); font-size: 13px;
+    }
+    .conflict-folder {
+      font-size: 11px; color: var(--slate-500);
+    }
+    .conflict-version {
+      font-size: 11px;
+      padding: 2px 8px;
+      background: var(--blue-100); color: var(--blue-700);
+      border-radius: 999px;
+      margin-left: auto;
+    }
+    .conflict-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .conflict-action {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .conflict-action:hover { background: #fff; }
+    .conflict-action input[type="radio"] {
+      accent-color: var(--blue-600);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .conflict-action .ca-rename-input {
+      flex: 1;
+      padding: 4px 8px;
+      border: 1px solid var(--slate-300);
+      border-radius: 5px;
+      font-size: 12px;
+      margin-left: 4px;
+    }
+    .conflict-action .ca-rename-input:disabled {
+      background: var(--slate-100);
+      cursor: not-allowed;
+    }
+    .conflict-action.skip { color: var(--slate-500); }
+    .modal-bulk-actions {
+      display: flex; gap: 8px; padding: 8px 0 12px; align-items: center;
+      font-size: 12px; color: var(--slate-600); flex-wrap: wrap;
+    }
+    .modal-bulk-actions button {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 5px;
+      border: 1px solid var(--slate-300);
+      background: #fff;
+      color: var(--slate-700);
+      cursor: pointer;
+    }
+    .modal-bulk-actions button:hover { background: var(--slate-100); }
   </style>
 </head>
 <body>
+
+<!-- ── Conflict-resolution modal ─────────────────────────────────────────────── -->
+<div class="modal-overlay" id="conflict-modal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">Service name conflicts</div>
+      <div class="modal-subtitle" id="conflict-subtitle">
+        Some of the service names already exist in their target folders. Choose what to do for each.
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-bulk-actions">
+        <span>Quick set all to:</span>
+        <button type="button" data-bulk="version">Add new version</button>
+        <button type="button" data-bulk="skip">Skip</button>
+      </div>
+      <div id="conflict-rows"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="btn-conflict-cancel">Cancel</button>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <span class="text-muted" id="conflict-summary"></span>
+        <button class="btn btn-primary" id="btn-conflict-confirm">Continue</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ── Sticky auth-expired toast ─────────────────────────────────────────────── -->
 <div class="auth-toast" id="auth-toast" role="alert">
@@ -622,10 +809,22 @@
 
   <!-- ── Header ──────────────────────────────────────────────────────────────── -->
   <header>
-    <div class="logo">CS</div>
+    <div class="logo" aria-label="Coherent">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 49 49" fill="none">
+        <path d="M24.17 24.17V13.64C16.65 13.64 10.53 7.52 10.53 0H0C0 13.35 10.82 24.17 24.17 24.17Z" fill="#6700F6"/>
+        <path d="M48.34 24.17V13.64C40.82 13.64 34.7 7.52 34.7 0H24.17C24.17 13.35 34.99 24.17 48.34 24.17Z" fill="white"/>
+        <path d="M24.17 48.2701V37.7401C16.65 37.7401 10.53 31.6201 10.53 24.1001H0C0 37.4501 10.82 48.2701 24.17 48.2701Z" fill="#6700F6"/>
+        <path d="M24.17 24.1001V34.6301C31.69 34.6301 37.81 40.7501 37.81 48.2701H48.34C48.34 34.9201 37.52 24.1001 24.17 24.1001Z" fill="#6700F6"/>
+      </svg>
+    </div>
     <h1>Coherent Spark</h1>
     <span class="subtitle">/ Bulk Upload</span>
   </header>
+
+  <!-- ── Beta banner (visible on every panel) ────────────────────────────────── -->
+  <div class="beta-banner" role="alert">
+    <strong>BETA</strong> — please verify all uploads in Spark before relying on them.
+  </div>
 
   <!-- ── Stepper ─────────────────────────────────────────────────────────────── -->
   <div class="stepper" id="stepper">
@@ -652,6 +851,31 @@
          PANEL 1 — Connect
     ═════════════════════════════════════════════════════════════ -->
     <div class="panel active" id="panel-connect">
+
+      <div class="beta-notice" role="region" aria-label="Beta notice">
+        <h3>⚠️ Beta Tool — Important Notice</h3>
+        <p>
+          This tool is provided as a Beta release. Outputs, mappings, and uploads generated
+          by this tool should be treated as drafts and must be reviewed in Coherent Spark
+          before being relied upon for any production, business, or decision-making purposes.
+        </p>
+        <p>Before using any uploaded service, please:</p>
+        <ul>
+          <li>Open the service in Spark and verify that inputs and outputs have been mapped correctly.</li>
+          <li>Run a small set of known test cases through the service and confirm the results match your expectations.</li>
+          <li>Review any metadata, naming, and configuration to ensure it aligns with your intended use.</li>
+        </ul>
+        <p>
+          Coherent makes no warranty as to the accuracy or completeness of outputs produced
+          by this Beta tool. Responsibility for validating uploads and confirming fitness
+          for purpose remains with the user prior to any downstream use.
+        </p>
+        <div class="ack">
+          By proceeding, you acknowledge that this tool is in Beta and agree to verify all
+          uploads in Spark before relying on them.
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-title">Connect to Coherent Spark</div>
         <div class="card-subtitle">Enter your Spark environment URL and authentication credentials.</div>
@@ -684,6 +908,7 @@
         <div class="field" id="field-token">
           <label>Bearer Token</label>
           <input type="password" id="input-token" placeholder="eyJhbGciOiJ..." autocomplete="off" />
+          <div class="text-muted" style="margin-top:4px;">Paste the JWT only — any leading <code>Bearer&nbsp;</code> prefix is stripped automatically.</div>
         </div>
         <div class="field hidden" id="field-apikey">
           <label>API Key</label>
@@ -742,7 +967,6 @@
                   <th>Original File</th>
                   <th style="min-width:160px;">Service Name</th>
                   <th style="min-width:160px;">Target Folder</th>
-                  <th style="width:96px; text-align:center;" title="Tick to update an existing service instead of creating a new one">Update?</th>
                   <th style="width:40px;"></th>
                 </tr>
               </thead>
@@ -781,6 +1005,7 @@
           <span class="title">📤 Uploading to Coherent Spark</span>
           <span style="display:flex; align-items:center; gap:10px;">
             <span class="count" id="overall-count">0 / 0</span>
+            <button class="btn btn-secondary btn-sm" id="btn-pause-batch" style="display:none;">⏸ Pause</button>
             <button class="btn btn-danger btn-sm" id="btn-cancel-batch" style="display:none;">⏹ Cancel remaining</button>
           </span>
         </div>
@@ -843,11 +1068,14 @@ const state = {
     running:      false,
     aborted:      false,    // user pressed "Cancel remaining"
     authExpired:  false,    // a 401 was seen mid-batch
+    paused:       false,    // user pressed "Pause"; workers wait at top of loop
   },
 };
 
-let nextFileId = 1;
-let idleTimer  = null;  // interval id for the stageState idle-warning sweep
+let nextFileId    = 1;
+let idleTimer     = null;   // interval id for the stageState idle-warning sweep
+let pausePromise  = null;   // resolves when the user presses Resume
+let pauseResolve  = null;   // call to release waiting workers
 
 // ─── Concurrency persistence ─────────────────────────────────────────────────
 
@@ -962,6 +1190,21 @@ $$('[name="auth-type"]').forEach(radio => {
 
 $('#btn-connect').addEventListener('click', doConnect);
 $('#input-url').addEventListener('keydown', e => { if (e.key === 'Enter') doConnect(); });
+
+// Strip any leading "Bearer " / "bearer " prefix as the user types or pastes —
+// Spark's auth headers want the JWT alone.
+(function bindTokenSanitiser() {
+  const input = $('#input-token');
+  if (!input) return;
+  const sanitise = () => {
+    const v = input.value;
+    const cleaned = v.replace(/^\s*bearer\s+/i, '');
+    if (cleaned !== v) input.value = cleaned;
+  };
+  input.addEventListener('input', sanitise);
+  input.addEventListener('paste', () => setTimeout(sanitise, 0));
+  input.addEventListener('blur',  sanitise);
+})();
 
 async function doConnect() {
   clearAlert('connect-error');
@@ -1122,7 +1365,8 @@ function addFiles(newFiles) {
       file,
       serviceName:      stem,
       folder:           '',
-      updateVersion:    false,    // false = create new (fail if exists); true = update existing
+      // Conflict resolution decided upfront via /api/check-names + the modal:
+      conflict:         null,     // null | { exists, version, latestVersionId, action: 'version'|'rename'|'skip', renamedTo? }
       status:           'queued', // queued | active | success | warning | error | cancelled
       stageState:       null,     // { stage, progress, message, lastEventAt }
       abortController:  null,
@@ -1197,17 +1441,6 @@ function renderFileTable() {
           ).join('')}
         </select>
       </td>
-      <td style="text-align:center;">
-        <label class="update-toggle" title="Tick to add a new version to an existing service&#10;Unticked = create fresh (will fail if name already exists)">
-          <input
-            type="checkbox"
-            class="update-version-cb"
-            data-file-id="${entry.id}"
-            ${entry.updateVersion ? 'checked' : ''}
-          />
-          <span class="update-toggle-label">${entry.updateVersion ? 'Update' : 'New'}</span>
-        </label>
-      </td>
       <td>
         <button class="btn btn-danger btn-sm remove-btn" data-file-id="${entry.id}" title="Remove">✕</button>
       </td>
@@ -1233,19 +1466,6 @@ function renderFileTable() {
     });
   });
 
-  $$('.update-version-cb').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const id    = Number(cb.dataset.fileId);
-      const entry = state.files.find(f => f.id === id);
-      if (entry) {
-        entry.updateVersion = cb.checked;
-        // Update the sibling label text immediately
-        const label = cb.nextElementSibling;
-        if (label) label.textContent = cb.checked ? 'Update' : 'New';
-      }
-    });
-  });
-
   $$('.remove-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = Number(btn.dataset.fileId);
@@ -1267,34 +1487,229 @@ function updateUploadButton() {
 
 $('#btn-start-upload').addEventListener('click', startUpload);
 $('#btn-cancel-batch').addEventListener('click', cancelBatch);
+$('#btn-pause-batch').addEventListener('click', togglePause);
 
 async function startUpload() {
   const toUpload = state.files.filter(f => f.serviceName && f.folder && f.status !== 'cancelled');
   if (!toUpload.length) return;
 
+  // ── Pre-flight: ask the server which names already exist ─────────────────
+  // If any do, show the conflict modal and let the user pick per-file actions.
+  // If the user cancels, we bail without entering Step 3.
+  const conflictsResolved = await resolveConflicts(toUpload);
+  if (!conflictsResolved) return;
+
+  // Re-filter: a user-skipped entry has status === 'cancelled' now and shouldn't run.
+  const queue = toUpload.filter(f => f.status !== 'cancelled');
+  if (!queue.length) return;
+
   // Reset any in-flight batch state from a prior run.
   state.batch.aborted     = false;
   state.batch.authExpired = false;
+  state.batch.paused      = false;
+  pausePromise = null; pauseResolve = null;
   hideAuthToast();
 
-  // Mark every entry to be uploaded as queued so the live chip counts are right
-  // (this also covers "Upload again" or repeat clicks).
-  toUpload.forEach(e => { e.status = 'queued'; e.stageState = null; });
+  // Mark every queue entry as queued so the live chip counts are right.
+  queue.forEach(e => { e.status = 'queued'; e.stageState = null; });
 
   goToStep(3);
-  buildProgressCards(toUpload);
+  buildProgressCards(queue);
   $('#summary-section').classList.add('hidden');
   $('#overall-fill').classList.remove('success');
   setConcurrencyDisabled(true);
   setCancelButtonVisible(true);
   startIdleSweep();
 
-  await runBatch(toUpload);
+  await runBatch(queue);
 
   setConcurrencyDisabled(false);
   setCancelButtonVisible(false);
   stopIdleSweep();
   renderFinalSummary();
+}
+
+// ─── Pre-flight: name conflict resolution ────────────────────────────────────
+
+/**
+ * Asks the server which (folder, serviceName) pairs already exist. If any do,
+ * opens the conflict modal so the user can pick per-file: add new version,
+ * rename to a different name, or skip. Resolves true if the user confirmed
+ * (or there were no conflicts), false if they cancelled.
+ *
+ * Side-effects on the entries:
+ *   - For "rename": entry.serviceName is replaced with the new name.
+ *   - For "skip":   entry.status is set to 'cancelled'.
+ *   - In all cases: entry.conflict is populated for record-keeping.
+ */
+async function resolveConflicts(entries) {
+  let results = [];
+  try {
+    const body = {
+      baseUrl: state.baseUrl,
+      items:   entries.map(e => ({ id: e.id, folder: e.folder, serviceName: e.serviceName })),
+    };
+    if (state.authType === 'token') body.token = state.token;
+    else                            body.apiKey = state.apiKey;
+
+    const resp = await fetch('/api/check-names', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!data.success) {
+      // 401/403 → halt and ask the user to refresh creds.
+      if (resp.status === 401) { handleAuthExpired(); return false; }
+      // Anything else: log and proceed without conflict info — Spark will
+      // surface a 409 on the upload if it really does clash.
+      console.warn('check-names failed:', data.error);
+      return true;
+    }
+    results = data.results || [];
+  } catch (err) {
+    console.warn('check-names network error:', err);
+    return true; // proceed; uploads themselves will surface real conflicts
+  }
+
+  const conflicts = results.filter(r => r.exists);
+  if (!conflicts.length) return true;
+
+  // Match results back to entries.
+  const byId = new Map(entries.map(e => [e.id, e]));
+  conflicts.forEach(r => {
+    const entry = byId.get(r.id);
+    if (entry) entry.conflict = { exists: true, version: r.version, latestVersionId: r.latestVersionId, action: 'version', renamedTo: '' };
+  });
+
+  // Show the modal and wait for the user's decision.
+  return await openConflictModal(conflicts.map(r => byId.get(r.id)).filter(Boolean));
+}
+
+let conflictModalResolve = null;
+
+function openConflictModal(conflictedEntries) {
+  return new Promise(resolve => {
+    conflictModalResolve = resolve;
+
+    const rowsEl = $('#conflict-rows');
+    rowsEl.innerHTML = conflictedEntries.map(e => {
+      const versionLabel = e.conflict.version ? `currently v${escapeHtml(e.conflict.version)}` : 'exists';
+      return `
+        <div class="conflict-row" data-id="${e.id}">
+          <div class="conflict-row-head">
+            <div>
+              <div class="conflict-name">${escapeHtml(e.serviceName)}</div>
+              <div class="conflict-folder">${escapeHtml(e.file.name)} → ${escapeHtml(e.folder)}</div>
+            </div>
+            <span class="conflict-version">${versionLabel}</span>
+          </div>
+          <div class="conflict-actions">
+            <label class="conflict-action">
+              <input type="radio" name="conflict-${e.id}" value="version" checked />
+              <span>Add new version to existing service</span>
+            </label>
+            <label class="conflict-action">
+              <input type="radio" name="conflict-${e.id}" value="rename" />
+              <span>Rename and create as new service:</span>
+              <input class="ca-rename-input" type="text" data-id="${e.id}" placeholder="new-service-name" disabled />
+            </label>
+            <label class="conflict-action skip">
+              <input type="radio" name="conflict-${e.id}" value="skip" />
+              <span>Skip this file</span>
+            </label>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Toggle the rename input enabled state with the radio.
+    $$('.conflict-row').forEach(row => {
+      const id = Number(row.dataset.id);
+      const radios  = row.querySelectorAll(`input[name="conflict-${id}"]`);
+      const renameI = row.querySelector('.ca-rename-input');
+      radios.forEach(r => r.addEventListener('change', () => {
+        renameI.disabled = r.value !== 'rename' || !r.checked;
+        if (r.value === 'rename' && r.checked) renameI.focus();
+        updateConflictSummary();
+      }));
+      renameI.addEventListener('input', updateConflictSummary);
+    });
+
+    updateConflictSummary();
+    $('#conflict-modal').classList.add('show');
+  });
+}
+
+function updateConflictSummary() {
+  const rows = $$('.conflict-row');
+  let version = 0, rename = 0, skip = 0;
+  rows.forEach(row => {
+    const checked = row.querySelector('input[type="radio"]:checked');
+    if (!checked) return;
+    if      (checked.value === 'version') version++;
+    else if (checked.value === 'rename')  rename++;
+    else if (checked.value === 'skip')    skip++;
+  });
+  const parts = [];
+  if (version) parts.push(`${version} new version${version === 1 ? '' : 's'}`);
+  if (rename)  parts.push(`${rename} rename${rename === 1 ? '' : 's'}`);
+  if (skip)    parts.push(`${skip} skipped`);
+  $('#conflict-summary').textContent = parts.length ? parts.join(' · ') : '';
+}
+
+// Bulk-set buttons.
+document.querySelectorAll('.modal-bulk-actions button[data-bulk]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const action = btn.dataset.bulk;
+    $$('.conflict-row').forEach(row => {
+      const id = Number(row.dataset.id);
+      const radio = row.querySelector(`input[name="conflict-${id}"][value="${action}"]`);
+      if (radio) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change'));
+      }
+    });
+  });
+});
+
+$('#btn-conflict-cancel').addEventListener('click', () => closeConflictModal(false));
+$('#btn-conflict-confirm').addEventListener('click', () => {
+  // Apply each row's choice to the underlying entry.
+  let invalidRename = null;
+  $$('.conflict-row').forEach(row => {
+    const id      = Number(row.dataset.id);
+    const entry   = state.files.find(f => f.id === id);
+    if (!entry) return;
+    const choice  = row.querySelector('input[type="radio"]:checked')?.value || 'version';
+    const newName = row.querySelector('.ca-rename-input')?.value.trim();
+    entry.conflict = entry.conflict || {};
+    entry.conflict.action = choice;
+
+    if (choice === 'rename') {
+      if (!newName) { invalidRename = entry; return; }
+      entry.conflict.renamedTo = newName;
+      entry.serviceName        = newName;     // the upload uses entry.serviceName
+    } else if (choice === 'skip') {
+      entry.status = 'cancelled';
+    }
+    // 'version' → no field changes; Spark auto-versions on the same name.
+  });
+
+  if (invalidRename) {
+    alert(`Please enter a new service name for "${invalidRename.file.name}" or pick a different action.`);
+    return;
+  }
+  closeConflictModal(true);
+});
+
+function closeConflictModal(confirmed) {
+  $('#conflict-modal').classList.remove('show');
+  if (conflictModalResolve) {
+    const r = conflictModalResolve;
+    conflictModalResolve = null;
+    r(confirmed);
+  }
 }
 
 /**
@@ -1315,6 +1730,10 @@ async function runBatch(entries) {
 
   async function worker() {
     while (true) {
+      if (state.batch.aborted || state.batch.authExpired) return;
+      // Honour pause: block here until the user clicks Resume.
+      if (state.batch.paused && pausePromise) await pausePromise;
+      // The user may have cancelled or auth-expired while we were paused.
       if (state.batch.aborted || state.batch.authExpired) return;
       const i = nextIdx++;
       if (i >= entries.length) return;
@@ -1378,16 +1797,46 @@ function setConcurrencyDisabled(disabled) {
 
 function setCancelButtonVisible(visible) {
   $('#btn-cancel-batch').style.display = visible ? 'inline-flex' : 'none';
+  $('#btn-pause-batch').style.display  = visible ? 'inline-flex' : 'none';
+  if (!visible) renderPauseButton(false);
 }
 
 function cancelBatch() {
   if (!state.batch.running) return;
   state.batch.aborted = true;
+  // If we were paused, release the workers so they can see `aborted` and exit.
+  if (state.batch.paused) togglePause();
   // Cancel everything still queued. In-flight files finish naturally.
   state.files.forEach(entry => {
     if (entry.status === 'queued') markCancelled(entry);
   });
   recomputeBatchSummary();
+}
+
+function togglePause() {
+  if (!state.batch.running) return;
+  if (state.batch.paused) {
+    // Resume — release any workers blocked on pausePromise.
+    state.batch.paused = false;
+    if (pauseResolve) {
+      pauseResolve();
+      pauseResolve = null;
+      pausePromise = null;
+    }
+    renderPauseButton(false);
+  } else {
+    state.batch.paused = true;
+    pausePromise = new Promise(r => { pauseResolve = r; });
+    renderPauseButton(true);
+  }
+}
+
+function renderPauseButton(paused) {
+  const btn = $('#btn-pause-batch');
+  if (!btn) return;
+  btn.textContent = paused ? '▶ Resume' : '⏸ Pause';
+  btn.classList.toggle('btn-primary',   paused);
+  btn.classList.toggle('btn-secondary', !paused);
 }
 
 function markCancelled(entry) {
@@ -1579,7 +2028,6 @@ async function uploadFile(entry) {
   formData.append('baseUrl',       state.baseUrl);
   formData.append('folder',        entry.folder);
   formData.append('serviceName',   entry.serviceName);
-  formData.append('updateVersion', entry.updateVersion ? 'true' : 'false');
   if (state.authType === 'token')  formData.append('token',  state.token);
   else                              formData.append('apiKey', state.apiKey);
 
@@ -1675,16 +2123,19 @@ function handleProgressEvent(entry, event) {
     }
 
     case 'done': {
-      const { status, executeUrl, versionId, message } = event;
+      const { status, executeUrl, apiTesterUrl, versionId, message } = event;
 
       if (status === 'success') {
         entry.status = 'success';
         setCardStatus(entry.id, 'success');
-        const link = executeUrl
-          ? `<a href="${escapeHtml(executeUrl)}" target="_blank" rel="noopener">${escapeHtml(executeUrl)}</a>`
-          : '';
         const vid = versionId ? ` &nbsp;·&nbsp; Version: <code>${escapeHtml(versionId)}</code>` : '';
-        setCardDetail(entry.id, 'success', `✅ Service published!${vid}${link ? `<br>🔗 ${link}` : ''}`);
+        const tester = apiTesterUrl
+          ? `<br>🧪 <a href="${escapeHtml(apiTesterUrl)}" target="_blank" rel="noopener"><strong>Open in API Tester</strong></a> &nbsp;<span class="text-muted">— recommended for verifying inputs and outputs</span>`
+          : '';
+        const api = executeUrl
+          ? `<br>🔗 <span class="text-muted">API endpoint:</span> <a href="${escapeHtml(executeUrl)}" target="_blank" rel="noopener">${escapeHtml(executeUrl)}</a>`
+          : '';
+        setCardDetail(entry.id, 'success', `✅ Service published!${vid}${tester}${api}`);
       } else if (status === 'warning') {
         entry.status = 'warning';
         setCardStatus(entry.id, 'warning');
@@ -1740,6 +2191,8 @@ $('#btn-retry-failed').addEventListener('click', async () => {
   // if the previous run halted on 401 — uploadFile reads state.token at fetch time.
   state.batch.aborted     = false;
   state.batch.authExpired = false;
+  state.batch.paused      = false;
+  pausePromise = null; pauseResolve = null;
   hideAuthToast();
 
   $('#summary-section').classList.add('hidden');
@@ -1764,6 +2217,8 @@ $('#btn-upload-again').addEventListener('click', () => {
   state.batch.aborted     = false;
   state.batch.authExpired = false;
   state.batch.running     = false;
+  state.batch.paused      = false;
+  pausePromise = null; pauseResolve = null;
   hideAuthToast();
   renderFileTable();
   updateUploadButton();
