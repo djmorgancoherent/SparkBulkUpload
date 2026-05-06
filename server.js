@@ -186,15 +186,109 @@ function buildHeaders(baseUrl, token, apiKey) {
   return headers;
 }
 
-/** Format an Axios error into a human-readable string. */
+/**
+ * Spark "additional_details" comes back as a map of error-code → context, e.g.
+ *   { ENGINE_1904_DATE_SYSTEM: ["1904DATESYSTEM"], DUPLICATE_INPUT_DEFINITION: ["MyRange"] }
+ *
+ * The Spark UI maps each code to a human sentence client-side. We do the same
+ * here for codes we can confirm; everything else falls back to a humanised
+ * "Title case: offending items" line so non-technical users at least see
+ * something meaningful instead of raw JSON.
+ *
+ * Add to this table as new codes show up in the wild — keys are exact Spark codes.
+ */
+const SPARK_ERROR_MESSAGES = {
+  ENGINE_1904_DATE_SYSTEM:
+    "'Use 1904 date system' is incompatible with Spark. Disable it in Excel — " +
+    "Windows: File → Options → Advanced → uncheck 'Use 1904 date system'. " +
+    "Mac: Excel → Preferences → Calculation → uncheck '1904 date system'.",
+  ENGINE_PRECISION_AS_DISPLAYED:
+    "'Set precision as displayed' is incompatible with Spark. Disable it in Excel's Advanced Options.",
+  ENGINE_LOTUS_COMPATIBILITY:
+    "Excel's 'Lotus compatibility settings: Transition formula evaluation' is incompatible with Spark. " +
+    "Disable it in Excel's Advanced Options.",
+};
+
+/**
+ * Convert Spark's `additional_details` object into a readable, multi-line summary.
+ * Returns '' if there's nothing useful to surface.
+ */
+function formatSparkErrorDetails(details) {
+  if (!details || typeof details !== 'object') return '';
+  const lines = [];
+  for (const [code, value] of Object.entries(details)) {
+    const friendly = SPARK_ERROR_MESSAGES[code];
+
+    // Filter out values that are just the key echoed back (Spark does this for
+    // some codes, e.g. value: ["1904DATESYSTEM"] for ENGINE_1904_DATE_SYSTEM).
+    let items = '';
+    if (Array.isArray(value)) {
+      const slugged = code.replace(/_/g, '');
+      items = value.filter(v => typeof v === 'string' && v.toUpperCase() !== slugged).join(', ');
+    } else if (typeof value === 'string') {
+      items = value;
+    } else if (value && typeof value === 'object') {
+      items = JSON.stringify(value).slice(0, 200);
+    }
+
+    if (friendly) {
+      lines.push(items ? `${friendly} (${items})` : friendly);
+    } else {
+      const titleCase = code.toLowerCase().replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+      lines.push(items ? `${titleCase}: ${items}` : titleCase);
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Format an Axios error into a human-readable string.
+ *
+ * Spark error bodies follow a common shape:
+ *   { status: 'Error', error: { error_category, error_type, message, additional_details } }
+ *
+ * We surface error.message + decoded additional_details first (those are the
+ * useful parts) and fall back to a longer raw-body slice only when the
+ * structured fields aren't present.
+ */
 function formatAxiosError(err) {
   const code = err.response?.status;
   const body = err.response?.data;
   let msg = code ? `HTTP ${code}` : err.message;
-  if (body) {
-    const detail = typeof body === 'object' ? JSON.stringify(body) : String(body);
-    msg += ` — ${detail.slice(0, 400)}`;
+
+  if (body && typeof body === 'object') {
+    const e        = body.error || {};
+    const headline = e.message || body.message || body.errorMessage;
+    const category = e.error_category;
+    const errType  = e.error_type;
+    const details  = e.additional_details;
+
+    // The decoded additional_details is the most useful thing for non-technical
+    // users — it surfaces the actual reason in plain English when we can map it.
+    const decoded = formatSparkErrorDetails(details);
+
+    if (decoded) {
+      // Lead with the decoded explanation; keep the headline + tag as a small suffix.
+      msg += `\n${decoded}`;
+      const suffixBits = [];
+      if (headline && headline !== 'INVALID_ENGINE_CONFIGURATION') suffixBits.push(headline);
+      const tag = [category, errType].filter(Boolean).join(' / ');
+      if (tag) suffixBits.push(`(${tag})`);
+      if (suffixBits.length) msg += `\n${suffixBits.join(' ')}`;
+    } else if (headline) {
+      msg += ` — ${headline}`;
+      const tag = [category, errType].filter(Boolean).join(' / ');
+      if (tag && tag !== headline) msg += ` (${tag})`;
+      if (typeof details === 'string') msg += ` — ${details}`;
+    } else {
+      // No structured fields we recognise — fall back to a longer raw-body slice.
+      msg += ` — ${JSON.stringify(body).slice(0, 800)}`;
+    }
+  } else if (body) {
+    msg += ` — ${String(body).slice(0, 800)}`;
   }
+
+  if (code === 400) msg += '\n💡 Open the file in the Spark console upload log for the full validation report.';
   if (code === 401) msg += '\n💡 For Bearer tokens: the token may have expired — refresh it from the Spark console.\n💡 For API keys: verify the key is correct and that the API key group has the Spark.FolderList.json (or Spark.AllEncompassingProxy.json) feature permission assigned.';
   if (code === 403) msg += '\n💡 Check that your key has write access to this folder/tenant.';
   if (code === 404) msg += '\n💡 Verify the base URL, tenant name, and that the folder exists.';

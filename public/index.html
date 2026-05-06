@@ -439,6 +439,8 @@
       flex-direction: column;
       gap: 10px;
       transition: border-color .2s;
+      min-width: 0;        /* allow flex children to shrink below content size */
+      overflow: hidden;    /* belt-and-braces: keep long strings inside the box */
     }
     .file-card.active  { border-color: var(--blue-300); box-shadow: 0 0 0 3px rgba(59,130,246,.08); }
     .file-card.success { border-color: var(--green-300); }
@@ -505,6 +507,11 @@
       padding: 8px 10px;
       border-radius: 6px;
       line-height: 1.5;
+      /* Make sure long unbroken strings (URLs, JSON dumps) stay inside the box */
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: pre-wrap;
+      max-width: 100%;
     }
     .fc-detail.success { background: var(--green-50); color: var(--green-700); }
     .fc-detail.error   { background: var(--red-50); color: var(--red-600); }
