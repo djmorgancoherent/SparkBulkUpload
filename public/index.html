@@ -661,6 +661,123 @@
     .file-card.cancelled { border-color: var(--slate-300); opacity: .7; }
     .badge-cancelled { background: var(--slate-200); color: var(--slate-600); }
 
+    /* ── File-load progress (during drop / select) ──────────────────────────── */
+    .file-load-progress {
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: var(--blue-50);
+      border: 1px solid var(--blue-100);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--blue-700);
+    }
+    .flp-label {
+      display: flex; justify-content: space-between;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    .flp-track {
+      height: 4px;
+      background: rgba(59,130,246,.2);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .flp-fill {
+      height: 100%;
+      background: var(--blue-600);
+      border-radius: 99px;
+      width: 0%;
+      transition: width .15s ease;
+    }
+
+    /* ── Help icon + hover tooltip ──────────────────────────────────────────── */
+    .help-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 15px; height: 15px;
+      border-radius: 50%;
+      background: var(--slate-200);
+      color: var(--slate-600);
+      font-size: 10px;
+      font-weight: 700;
+      margin-left: 5px;
+      cursor: help;
+      position: relative;
+      flex-shrink: 0;
+      user-select: none;
+    }
+    .help-icon:hover { background: var(--slate-300); color: var(--slate-800); }
+    .help-icon::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--slate-800);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 400;
+      line-height: 1.45;
+      width: 260px;
+      max-width: 280px;
+      white-space: normal;
+      text-align: left;
+      letter-spacing: 0;
+      text-transform: none;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .15s;
+      z-index: 100;
+    }
+    .help-icon::before {
+      content: "";
+      position: absolute;
+      bottom: calc(100% + 2px);
+      left: 50%;
+      transform: translateX(-50%);
+      border: 5px solid transparent;
+      border-top-color: var(--slate-800);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .15s;
+      z-index: 100;
+    }
+    .help-icon:hover::after,
+    .help-icon:hover::before { opacity: 1; }
+
+    /* ── Bulk folder picker ─────────────────────────────────────────────────── */
+    .bulk-actions-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      padding: 8px 12px;
+      background: var(--blue-50);
+      border: 1px solid var(--blue-100);
+      border-radius: 7px;
+      font-size: 12px;
+      color: var(--blue-700);
+    }
+    .bulk-actions-row label {
+      font-weight: 600;
+      letter-spacing: .2px;
+    }
+    .bulk-folder-select {
+      max-width: 260px;
+      font-size: 12px;
+      padding: 5px 8px !important;
+      border: 1px solid var(--blue-100);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--slate-800);
+      cursor: pointer;
+    }
+    .bulk-folder-select:hover { background: var(--slate-50); }
+
     /* ── Conflict-resolution modal ──────────────────────────────────────────── */
     .modal-overlay {
       position: fixed; inset: 0;
@@ -952,6 +1069,15 @@
           <input type="file" id="file-input" accept=".xlsx,.xls,.xlsm" multiple />
         </div>
 
+        <!-- File-load progress (visible while adding files; hidden otherwise) -->
+        <div class="file-load-progress hidden" id="file-load-progress">
+          <div class="flp-label">
+            <span>Adding files…</span>
+            <span><span id="flp-current">0</span> / <span id="flp-total">0</span></span>
+          </div>
+          <div class="flp-track"><div class="flp-fill" id="flp-fill"></div></div>
+        </div>
+
         <!-- Files list -->
         <div id="files-section" class="hidden">
           <div class="files-header">
@@ -959,11 +1085,22 @@
               Files to upload
               <span class="file-count" id="file-count-badge">0</span>
             </h3>
-            <div style="display:flex; gap:8px; align-items:center;">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
               <span class="text-muted" id="folder-status-label"></span>
               <button class="btn btn-secondary btn-sm" id="btn-refresh-folders">↻ Refresh Folders</button>
               <button class="btn btn-danger btn-sm" id="btn-clear-all">Clear all</button>
             </div>
+          </div>
+
+          <!-- Bulk folder picker (its own row so it doesn't crowd the header) -->
+          <div class="bulk-actions-row">
+            <label for="bulk-folder-select">
+              Send every file to one folder:
+              <span class="help-icon" data-tip="Quickly assign the same target Spark folder to every file in the list. You can still override individual rows below.">?</span>
+            </label>
+            <select id="bulk-folder-select" class="bulk-folder-select">
+              <option value="">📁 Pick a folder to apply to all files…</option>
+            </select>
           </div>
 
           <div style="overflow-x:auto;">
@@ -987,8 +1124,11 @@
           <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
             <button class="btn btn-secondary" id="btn-back-connect">← Back</button>
             <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-              <span class="concurrency-control" title="How many uploads to run at the same time">
-                <label for="concurrency-slider">Parallel</label>
+              <span class="concurrency-control">
+                <label for="concurrency-slider">
+                  Files uploading at once:
+                  <span class="help-icon" data-tip="How many files to upload in parallel. Higher is faster but uses more bandwidth and Spark capacity. 4 is a safe default; raise it for fast networks, drop it if uploads start timing out.">?</span>
+                </label>
                 <input type="range" id="concurrency-slider" min="1" max="6" value="4" />
                 <span class="conc-val" id="concurrency-val">4</span>
               </span>
@@ -1308,8 +1448,30 @@ function populateFolderSelects() {
     const entry = state.files.find(f => String(f.id) === String(id));
     if (entry) entry.folder = sel.value;
   });
+  // Also rebuild the bulk picker so its options match the loaded folders.
+  const bulk = $('#bulk-folder-select');
+  if (bulk) {
+    bulk.innerHTML = `<option value="">📁 Pick a folder to apply to all files…</option>` +
+      state.folders.map(f =>
+        `<option value="${escapeHtml(f.name)}">${escapeHtml(f.name)}</option>`
+      ).join('');
+  }
   updateUploadButton();
 }
+
+// Bulk folder picker — applies one folder to every file in the queue.
+$('#bulk-folder-select').addEventListener('change', () => {
+  const sel = $('#bulk-folder-select');
+  const folder = sel.value;
+  if (!folder) return;
+  state.files.forEach(entry => { entry.folder = folder; });
+  // Update every visible per-row select to match.
+  $$('.folder-select').forEach(s => { s.value = folder; });
+  // Reset the bulk picker back to its placeholder so re-picking the same
+  // folder still fires a change event.
+  sel.value = '';
+  updateUploadButton();
+});
 
 function rebuildFolderSelect(sel) {
   const current = sel.value;
@@ -1349,37 +1511,70 @@ dropZone.addEventListener('drop', e => {
   else showAlert('files-error', 'warning', '⚠️', 'Only .xlsx / .xls / .xlsm files are accepted.');
 });
 
+/**
+ * Add files to the queue, with live progress feedback.
+ *
+ * For large drops (50+ files), the synchronous churn of pushing entries +
+ * rendering the table can briefly stall the UI. We give the browser a chance
+ * to paint a progress bar by processing in chunks and yielding between them.
+ *
+ * Duplicate detection uses a Set so a 50-file drop is O(N) instead of O(N²).
+ */
 function addFiles(newFiles) {
+  if (!newFiles?.length) return;
   clearAlert('files-error');
 
+  // Snapshot the existing names ONCE (O(N) build, O(1) lookups).
+  const existing = new Set(state.files.map(f => f.file.name));
+  // Also dedupe within this drop (e.g. user dropped the same file twice somehow).
+  const queue    = [];
+  for (const f of newFiles) {
+    if (existing.has(f.name)) continue;
+    existing.add(f.name);
+    queue.push(f);
+  }
+  if (!queue.length) {
+    showAlert('files-error', 'info', 'ℹ️', `All ${newFiles.length} file(s) are already in the list.`);
+    return;
+  }
+
+  // Show immediate progress UI; defer the heavy work so this paints first.
+  showFileLoadProgress(0, queue.length);
+  setTimeout(() => addFilesChunked(queue), 0);
+}
+
+async function addFilesChunked(queue) {
   const maxMb    = state.config.maxFileMb;
   const maxBytes = maxMb * 1024 * 1024;
   const tooBig   = [];
-  let   added    = 0;
+  const CHUNK    = 10;
 
-  newFiles.forEach(file => {
-    // Avoid duplicates by name
-    if (state.files.find(f => f.file.name === file.name)) return;
-
-    if (file.size > maxBytes) {
-      tooBig.push(`${file.name} (${formatBytes(file.size)})`);
-      return;
+  for (let i = 0; i < queue.length; i += CHUNK) {
+    for (let j = i; j < Math.min(i + CHUNK, queue.length); j++) {
+      const file = queue[j];
+      if (file.size > maxBytes) {
+        tooBig.push(`${file.name} (${formatBytes(file.size)})`);
+        continue;
+      }
+      const stem = file.name.replace(/\.(xlsx|xls|xlsm)$/i, '');
+      state.files.push({
+        id:               nextFileId++,
+        file,
+        serviceName:      stem,
+        folder:           '',
+        // Conflict resolution decided upfront via /api/check-names + the modal:
+        conflict:         null,
+        status:           'queued',
+        stageState:       null,
+        abortController:  null,
+      });
     }
+    showFileLoadProgress(Math.min(i + CHUNK, queue.length), queue.length);
+    // Yield so the browser can repaint the progress bar.
+    await new Promise(r => requestAnimationFrame(r));
+  }
 
-    const stem = file.name.replace(/\.(xlsx|xls|xlsm)$/i, '');
-    state.files.push({
-      id:               nextFileId++,
-      file,
-      serviceName:      stem,
-      folder:           '',
-      // Conflict resolution decided upfront via /api/check-names + the modal:
-      conflict:         null,     // null | { exists, version, latestVersionId, action: 'version'|'rename'|'skip', renamedTo? }
-      status:           'queued', // queued | active | success | warning | error | cancelled
-      stageState:       null,     // { stage, progress, message, lastEventAt }
-      abortController:  null,
-    });
-    added++;
-  });
+  hideFileLoadProgress();
 
   if (tooBig.length) {
     showAlert(
@@ -1387,7 +1582,6 @@ function addFiles(newFiles) {
       `Skipped ${tooBig.length} file${tooBig.length === 1 ? '' : 's'} over the ${maxMb} MB per-file limit:\n  • ${tooBig.join('\n  • ')}`
     );
   } else if (state.files.length > 50) {
-    // Soft warning — not a hard cap.
     showAlert(
       'files-error', 'warning', '💡',
       `You've queued ${state.files.length} files. The default parallelism is 4; adjust the slider if you want it higher.`
@@ -1396,6 +1590,21 @@ function addFiles(newFiles) {
 
   renderFileTable();
   updateUploadButton();
+}
+
+function showFileLoadProgress(done, total) {
+  const box = $('#file-load-progress');
+  if (!box) return;
+  box.classList.remove('hidden');
+  $('#flp-current').textContent = done;
+  $('#flp-total').textContent   = total;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  $('#flp-fill').style.width = `${pct}%`;
+}
+
+function hideFileLoadProgress() {
+  const box = $('#file-load-progress');
+  if (box) box.classList.add('hidden');
 }
 
 $('#btn-clear-all').addEventListener('click', () => {
